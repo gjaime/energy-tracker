@@ -2,10 +2,10 @@ const express = require('express')
 const router  = express.Router()
 const pool    = require('../db/pool')
 const { obtenerCicloActivo, evaluarAlertaCiclo } = require('../services/cicloService')
-const { auth } = require('../middleware/auth')
+const { authN8N } = require('../middleware/auth')
 
 // GET /api/stats — resumen del ciclo activo para n8n (/estado comando)
-router.get('/', auth, async (req, res) => {
+router.get('/', authN8N, async (req, res) => {
   const { servicio_id } = req.query
   if (!servicio_id) return res.status(400).json({ error: 'servicio_id requerido' })
 

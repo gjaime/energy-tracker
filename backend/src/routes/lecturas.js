@@ -8,10 +8,10 @@ const express = require('express')
 const router  = express.Router()
 const pool    = require('../db/pool')
 const { obtenerCicloActivo, calcularPromedioDiario, calcularConsumoDia } = require('../services/cicloService')
-const { auth } = require('../middleware/auth')
+const { authN8N } = require('../middleware/auth')
 
 // ── POST /api/lecturas ────────────────────────────────────────────────────
-router.post('/', auth, async (req, res) => {
+router.post('/', authN8N, async (req, res) => {
   const { servicio_id, lectura_valor, tipo = 'lectura_diaria', fecha, notas = '', telegram_id } = req.body
 
   if (!servicio_id || lectura_valor == null)
@@ -105,7 +105,7 @@ router.post('/', auth, async (req, res) => {
 })
 
 // ── GET /api/lecturas — histórico del ciclo activo ────────────────────────
-router.get('/', auth, async (req, res) => {
+router.get('/', authN8N, async (req, res) => {
   const { servicio_id } = req.query
   if (!servicio_id) return res.status(400).json({ error: 'servicio_id requerido' })
 
@@ -124,7 +124,7 @@ router.get('/', auth, async (req, res) => {
 })
 
 // ── POST /api/confirmar ───────────────────────────────────────────────────
-router.post('/confirmar', auth, async (req, res) => {
+router.post('/confirmar', authN8N, async (req, res) => {
   const { pendiente_id } = req.body
   if (!pendiente_id) return res.status(400).json({ error: 'pendiente_id requerido' })
 
@@ -155,7 +155,7 @@ router.post('/confirmar', auth, async (req, res) => {
 })
 
 // ── POST /api/cancelar ────────────────────────────────────────────────────
-router.post('/cancelar', auth, async (req, res) => {
+router.post('/cancelar', authN8N, async (req, res) => {
   const { pendiente_id } = req.body
   if (!pendiente_id) return res.status(400).json({ error: 'pendiente_id requerido' })
 
