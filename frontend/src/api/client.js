@@ -12,7 +12,7 @@ const api = axios.create({
 
 // Interceptor de REQUEST — agrega el token JWT en cada llamada
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('cfe_token')
+  const token = localStorage.getItem('energy_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -25,7 +25,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       // Token expirado o inválido → limpiar sesión y redirigir al login
-      localStorage.removeItem('cfe_token')
+      localStorage.removeItem('energy_token')
       localStorage.removeItem('cfe_user')
       window.location.href = '/login'
     }

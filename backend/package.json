@@ -1,7 +1,7 @@
 {
-  "name": "cfe-tracker-api",
+  "name": "energy-tracker-api",
   "version": "2.0.0",
-  "description": "CFE Tracker API — Node.js + Express + PostgreSQL",
+  "description": "Energy Tracker API — Node.js + Express + PostgreSQL",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

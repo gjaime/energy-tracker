@@ -13,7 +13,7 @@ export function AuthProvider({ children }) {
 
   // Al cargar la app, restaurar sesión si existe token guardado
   useEffect(() => {
-    const userGuardado = localStorage.getItem('cfe_user')
+    const userGuardado = localStorage.getItem('energy_user')
     if (userGuardado) {
       setUsuario(JSON.parse(userGuardado))
     }
@@ -22,8 +22,8 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const data = await apiLogin(email, password)
-    localStorage.setItem('cfe_token', data.access_token)
-    localStorage.setItem('cfe_user', JSON.stringify({
+    localStorage.setItem('energy_token', data.access_token)
+    localStorage.setItem('energy_user', JSON.stringify({
       id: data.usuario_id,
       nombre: data.nombre,
       rol: data.rol,
@@ -33,8 +33,8 @@ export function AuthProvider({ children }) {
   }
 
   const logout = () => {
-    localStorage.removeItem('cfe_token')
-    localStorage.removeItem('cfe_user')
+    localStorage.removeItem('energy_token')
+    localStorage.removeItem('energy_user')
     setUsuario(null)
   }
 

@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import { useServicios } from '../hooks/useServicios'
 import { useEventos } from '../hooks/useEventos'
 import { useRecibos } from '../hooks/useRecibos'
@@ -13,7 +15,8 @@ export default function Dashboard() {
   const [servicioActivo, setServicioActivo] = useState(null)
   const servicio = servicios.find(s => s.id === servicioActivo) || servicios[0]
 
-  const { eventos, cargando: cargandoEventos, agregarLectura } = useEventos(servicio?.id)
+  const { usuario } = useAuth()
+  const navigate = useNavigate()
   const { recibos, importando, subir } = useRecibos(servicio?.id)
 
   const [tab, setTab] = useState('dashboard')
@@ -67,7 +70,13 @@ export default function Dashboard() {
 
       {/* Header */}
       <div style={{ background: '#0f1923', borderBottom: '1px solid #1d2430', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ color: '#1aff70', fontWeight: 'bold', fontSize: '16px' }}>⚡ CFE Tracker</span>
+        <span style={{ color: '#1aff70', fontWeight: 'bold', fontSize: '16px' }}>⚡ Energy Tracker</span>
+          {usuario?.rol === 'admin' && (
+            <button onClick={() => navigate('/admin')} style={{
+              background: 'none', border: '1px solid #1d2430', borderRadius: '6px',
+              color: '#3d5070', padding: '4px 10px', fontSize: '12px', cursor: 'pointer',
+            }}>⚙️ Config</button>
+          )}
 
         {/* Selector de servicio */}
         {servicios.length > 1 && (

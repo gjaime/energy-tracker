@@ -1,4 +1,4 @@
-# ⚡ CFE Tracker
+# ⚡ Energy Tracker
 
 Webapp para monitoreo de consumo eléctrico bimestral en México (CFE).
 Registro diario de lecturas del medidor, importación de recibos PDF con extracción automática via Claude AI, y bot de Telegram para registro desde el celular.
@@ -8,7 +8,7 @@ Registro diario de lecturas del medidor, importación de recibos PDF con extracc
 ## 🗂 Estructura del proyecto
 
 ```
-cfe-tracker/
+energy-tracker/
 ├── backend/          → API REST (Node.js + Express)
 ├── frontend/         → Interfaz web (React + Vite)
 ├── database/         → Scripts SQL de inicialización y seed
@@ -32,7 +32,7 @@ Tu celular
                          │ http://backend:3847  (red interna Docker)
                          ▼
 ┌─────────────────────────────────────────┐
-│         LXC 10.13.69.105                │
+│         LXC 10.13.69.90                │
 │                                         │
 │  nginx (:80)                            │
 │    ├── / ──────► frontend (:3000)       │
@@ -65,7 +65,7 @@ El script crea el LXC `.105` con Debian 12, instala Docker y clona el repo.
 
 ```bash
 pct enter 105
-nano /opt/cfe-tracker/.env
+nano /opt/energy-tracker/.env
 ```
 
 Ver `.env.example` para la lista completa. Variables mínimas requeridas:
@@ -82,7 +82,7 @@ Ver `.env.example` para la lista completa. Variables mínimas requeridas:
 ### 3. Levantar los servicios
 
 ```bash
-cd /opt/cfe-tracker
+cd /opt/energy-tracker
 docker compose up -d
 docker compose ps
 ```
@@ -93,11 +93,11 @@ Después del primer deploy, obtener los UUIDs reales:
 
 ```bash
 # UUID del usuario admin (para N8N_SERVICE_USER_ID)
-docker compose exec database psql -U cfe_user -d cfe_tracker \
+docker compose exec database psql -U cfe_user -d energy_tracker \
   -c "SELECT id, email FROM usuarios;"
 
-# UUID del servicio CFE (para CFE_SERVICIO_ID)
-docker compose exec database psql -U cfe_user -d cfe_tracker \
+# UUID del servicio CFE (para ENERGY_SERVICIO_ID)
+docker compose exec database psql -U cfe_user -d energy_tracker \
   -c "SELECT id, alias, numero_servicio FROM servicios;"
 ```
 
@@ -109,8 +109,8 @@ docker compose restart backend n8n
 ### 5. Configurar el bot de Telegram en n8n
 
 ```
-1. Abre http://10.13.69.105:5678
-2. Workflows → Import from file → n8n/cfe-workflow.json
+1. Abre http://10.13.69.90:5678
+2. Workflows → Import from file → n8n/energy-workflow.json
 3. Credentials → Telegram API → pegar token de @BotFather
 4. Credentials → Header Auth → pegar N8N_API_KEY
 5. Activar el workflow
@@ -120,9 +120,9 @@ docker compose restart backend n8n
 
 | Servicio | URL |
 |---|---|
-| Webapp | `http://10.13.69.105` |
-| n8n | `http://10.13.69.105:5678` |
-| API health | `http://10.13.69.105/health` |
+| Webapp | `http://10.13.69.90` |
+| n8n | `http://10.13.69.90:5678` |
+| API health | `http://10.13.69.90/health` |
 
 ---
 
@@ -173,5 +173,5 @@ docker compose restart backend
 docker compose down -v && docker compose up -d
 
 # Entrar a psql
-docker compose exec database psql -U cfe_user -d cfe_tracker
+docker compose exec database psql -U cfe_user -d energy_tracker
 ```

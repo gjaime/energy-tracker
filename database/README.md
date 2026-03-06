@@ -1,4 +1,4 @@
-# Base de datos — CFE Tracker
+# Base de datos — Energy Tracker
 
 Scripts SQL ejecutados automáticamente al iniciar el contenedor PostgreSQL.
 

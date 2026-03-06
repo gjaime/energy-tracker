@@ -35,7 +35,7 @@ export default function Login() {
       }}>
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
           <div style={{ fontSize: '32px', marginBottom: '8px' }}>⚡</div>
-          <h1 style={{ color: '#1aff70', margin: 0, fontSize: '22px' }}>CFE Tracker</h1>
+          <h1 style={{ color: '#1aff70', margin: 0, fontSize: '22px' }}>Energy Tracker</h1>
           <p style={{ color: '#3d5070', margin: '6px 0 0', fontSize: '13px' }}>
             Monitoreo de consumo eléctrico
           </p>

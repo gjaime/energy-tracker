@@ -1,5 +1,5 @@
 -- =============================================================
--- CFE Tracker v2 — Schema PostgreSQL
+-- Energy Tracker v2 — Schema PostgreSQL
 -- Node.js + Express + PostgreSQL
 -- =============================================================
 
@@ -208,5 +208,5 @@ CREATE TRIGGER trg_ciclos_updated_at
 -- DATOS INICIALES — usuario admin + servicio real
 -- =============================================================
 INSERT INTO usuarios (nombre, email, password_hash, rol)
-VALUES ('Administrador', 'admin@cfe-tracker.local',
+VALUES ('Administrador', 'admin@energy-tracker.local',
         '$2b$10$placeholder_cambiar_en_primer_uso_xxxxxxxxxxxxxxxxx', 'admin');

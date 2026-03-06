@@ -1,4 +1,4 @@
-# Frontend — CFE Tracker
+# Frontend — Energy Tracker
 
 Interfaz web construida con React 18 + Vite.
 

@@ -1,8 +1,8 @@
 version: "3.9"
 
 # =============================================================
-# CFE Tracker — Docker Compose
-# LXC target: 10.13.69.105 (pve01)
+# Energy Tracker — Docker Compose
+# LXC target: 10.13.69.90 (pve01)
 # Todos los servicios en un solo contenedor
 # =============================================================
 
@@ -13,7 +13,7 @@ services:
   # ─────────────────────────────────────────
   database:
     image: postgres:16-alpine
-    container_name: cfe_database
+    container_name: energy_database
     restart: unless-stopped
     environment:
       POSTGRES_DB:       ${DB_NAME}
@@ -37,7 +37,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: cfe_backend
+    container_name: energy_backend
     restart: unless-stopped
     environment:
       DATABASE_URL:        postgresql://${DB_USER}:${DB_PASSWORD}@database:5432/${DB_NAME}
@@ -66,7 +66,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: cfe_frontend
+    container_name: energy_frontend
     restart: unless-stopped
     environment:
       VITE_API_URL: ${VITE_API_URL:-/api}
@@ -83,11 +83,11 @@ services:
   # ─────────────────────────────────────────
   n8n:
     image: n8nio/n8n:latest
-    container_name: cfe_n8n
+    container_name: energy_n8n
     restart: unless-stopped
     environment:
       # URL base que n8n usa para sus webhooks (Telegram necesita esto)
-      WEBHOOK_URL:            http://10.13.69.105:5678
+      WEBHOOK_URL:            http://10.13.69.90:5678
       # Zona horaria
       GENERIC_TIMEZONE:       America/Mexico_City
       TZ:                     America/Mexico_City
@@ -98,8 +98,8 @@ services:
       # Encriptación de credenciales guardadas
       N8N_ENCRYPTION_KEY:     ${N8N_ENCRYPTION_KEY}
       # Variables disponibles en los workflows
-      N8N_ENV_CFE_SERVICIO_ID:    ${CFE_SERVICIO_ID}
-      N8N_ENV_CFE_API_KEY:        ${N8N_API_KEY}
+      N8N_ENV_ENERGY_SERVICIO_ID:    ${ENERGY_SERVICIO_ID}
+      N8N_ENV_ENERGY_API_KEY:        ${N8N_API_KEY}
       # DB para n8n (usa la misma PostgreSQL)
       DB_TYPE:                postgresdb
       DB_POSTGRESDB_HOST:     database
@@ -125,7 +125,7 @@ services:
   # ─────────────────────────────────────────
   nginx:
     image: nginx:alpine
-    container_name: cfe_nginx
+    container_name: energy_nginx
     restart: unless-stopped
     ports:
       - "80:80"

@@ -1,17 +1,17 @@
 -- =============================================================
--- CFE Tracker v2 — Datos históricos reales
+-- Energy Tracker v2 — Datos históricos reales
 -- Servicio: 076200457478 · Medidor: Y613KR · Querétaro
 -- =============================================================
 
--- Usuario de prueba (password: cfe2026 — cambiar en producción)
+-- Usuario de prueba (password: energy2026 — cambiar en producción)
 UPDATE usuarios
 SET password_hash = '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi'
-WHERE email = 'admin@cfe-tracker.local';
+WHERE email = 'admin@energy-tracker.local';
 
 -- Servicio real
 INSERT INTO servicios (usuario_id, alias, numero_servicio, numero_medidor, tarifa_tipo, ciudad, estado_rep)
 SELECT id, 'Casa', '076200457478', 'Y613KR', '1', 'Querétaro', 'Querétaro'
-FROM usuarios WHERE email = 'admin@cfe-tracker.local';
+FROM usuarios WHERE email = 'admin@energy-tracker.local';
 
 -- Ciclos históricos (B1-2024 a B12-2025)
 -- Se insertan como cerrados con sus recibos reales
