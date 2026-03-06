@@ -1,0 +1,141 @@
+version: "3.9"
+
+# =============================================================
+# CFE Tracker — Docker Compose
+# LXC target: 10.13.69.105 (pve01)
+# Todos los servicios en un solo contenedor
+# =============================================================
+
+services:
+
+  # ─────────────────────────────────────────
+  # 🗄️  BASE DE DATOS
+  # ─────────────────────────────────────────
+  database:
+    image: postgres:16-alpine
+    container_name: cfe_database
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME}
+      POSTGRES_USER:     ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # ⚙️  BACKEND — Node.js + Express
+  # Interno — solo accesible dentro de Docker
+  # n8n lo llama como http://backend:3847
+  # ─────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cfe_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL:        postgresql://${DB_USER}:${DB_PASSWORD}@database:5432/${DB_NAME}
+      SECRET_KEY:          ${SECRET_KEY}
+      ANTHROPIC_API_KEY:   ${ANTHROPIC_API_KEY}
+      N8N_API_KEY:         ${N8N_API_KEY}
+      N8N_SERVICE_USER_ID: ${N8N_SERVICE_USER_ID}
+      PORT:                3847
+      NODE_ENV:            ${NODE_ENV:-production}
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3847/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    # Sin "ports" — nginx y n8n lo alcanzan por red interna Docker
+
+  # ─────────────────────────────────────────
+  # 🌐  FRONTEND — React + Vite
+  # ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cfe_frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-/api}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+  # ─────────────────────────────────────────
+  # 🤖  N8N — Automatización / Telegram bridge
+  # Puerto 5678 accesible desde la red local
+  # Datos persistidos en volumen n8n_data
+  # ─────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: cfe_n8n
+    restart: unless-stopped
+    environment:
+      # URL base que n8n usa para sus webhooks (Telegram necesita esto)
+      WEBHOOK_URL:            http://10.13.69.105:5678
+      # Zona horaria
+      GENERIC_TIMEZONE:       America/Mexico_City
+      TZ:                     America/Mexico_City
+      # Seguridad básica de acceso a la UI
+      N8N_BASIC_AUTH_ACTIVE:  true
+      N8N_BASIC_AUTH_USER:    ${N8N_UI_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_UI_PASSWORD}
+      # Encriptación de credenciales guardadas
+      N8N_ENCRYPTION_KEY:     ${N8N_ENCRYPTION_KEY}
+      # Variables disponibles en los workflows
+      N8N_ENV_CFE_SERVICIO_ID:    ${CFE_SERVICIO_ID}
+      N8N_ENV_CFE_API_KEY:        ${N8N_API_KEY}
+      # DB para n8n (usa la misma PostgreSQL)
+      DB_TYPE:                postgresdb
+      DB_POSTGRESDB_HOST:     database
+      DB_POSTGRESDB_PORT:     5432
+      DB_POSTGRESDB_DATABASE: ${DB_NAME}
+      DB_POSTGRESDB_USER:     ${DB_USER}
+      DB_POSTGRESDB_PASSWORD: ${DB_PASSWORD}
+      DB_POSTGRESDB_SCHEMA:   n8n
+    volumes:
+      - n8n_data:/home/node/.n8n
+    ports:
+      - "5678:5678"
+    depends_on:
+      database:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────
+  # 🔀  NGINX — Reverse proxy
+  # :80  → frontend
+  # /api → backend
+  # ─────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: cfe_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  postgres_data:
+  uploads_data:
+  n8n_data:
