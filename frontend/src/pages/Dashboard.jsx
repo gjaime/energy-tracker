@@ -18,7 +18,7 @@ export default function Dashboard() {
   const { usuario } = useAuth()
   const navigate = useNavigate()
   const { recibos, importando, subir } = useRecibos(servicio?.id)
-
+  const { eventos, cargando: cargandoEventos, agregarLectura } = useEventos(servicio?.id)
   const [tab, setTab] = useState('dashboard')
   const [nuevaLectura, setNuevaLectura] = useState('')
   const [fechaLectura, setFechaLectura] = useState(format(new Date(), 'yyyy-MM-dd'))
