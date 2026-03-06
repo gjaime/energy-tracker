@@ -15,7 +15,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parsear el mensaje de Telegram y enrutar al comando correcto\nconst msg = $input.first().json.message;\nconst text = (msg?.text || '').trim();\nconst chatId = msg?.chat?.id;\nconst telegramId = msg?.from?.id;\n\nif (!text || !chatId) return [];\n\n// Tokenizar: /comando valor fecha nota\nconst tokens = text.split(/\\s+/);\nconst comando = tokens[0]?.toLowerCase();\nconst token1  = tokens[1]; // valor numérico\nconst token2  = tokens[2]; // fecha (YYYY-MM-DD) o nota\nconst token3  = tokens.slice(3).join(' '); // resto como nota\n\n// Detectar si token2 es fecha o nota\nconst esFecha = /^\\d{4}-\\d{2}-\\d{2}$/.test(token2);\nconst fecha   = esFecha ? token2 : null;\nconst nota    = esFecha ? token3 : tokens.slice(2).join(' ');\n\nreturn [{\n  json: {\n    comando,\n    chat_id:     chatId,\n    telegram_id: telegramId,\n    lectura:     token1 ? parseInt(token1) : null,\n    fecha,\n    nota,\n    token1,\n    texto_original: text\n  }\n}];"
+        "jsCode": "const msg = $input.first().json.message;\nconst text = (msg?.text || '').trim();\nconst chatId = msg?.chat?.id;\nconst telegramId = msg?.from?.id;\nif (!text || !chatId) return [];\nconst tokens = text.split(/\\s+/);\nconst comando = tokens[0]?.toLowerCase();\nconst token1 = tokens[1];\nconst token2 = tokens[2];\nconst token3 = tokens.slice(3).join(' ');\nconst esFecha = /^\\d{4}-\\d{2}-\\d{2}$/.test(token2);\nconst fecha = esFecha ? token2 : null;\nconst nota = esFecha ? token3 : tokens.slice(2).join(' ');\nreturn [{ json: { comando, chat_id: chatId, telegram_id: telegramId, lectura: token1 ? parseInt(token1) : null, fecha, nota, token1, texto_original: text } }];"
       },
       "name": "Parsear Comando",
       "type": "n8n-nodes-base.code",
@@ -24,23 +24,40 @@
     },
     {
       "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.comando }}",
         "rules": {
           "rules": [
-            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.comando }}", "rightValue": "/lectura", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "lectura" },
-            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.comando }}", "rightValue": "/cierre",  "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "cierre" },
-            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.comando }}", "rightValue": "/evento",  "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "evento" },
-            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.comando }}", "rightValue": "/confirmar", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "confirmar" },
-            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.comando }}", "rightValue": "/cancelar", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "cancelar" },
-            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.comando }}", "rightValue": "/estado",  "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "estado" },
-            { "conditions": { "options": { "caseSensitive": false }, "conditions": [{ "leftValue": "={{ $json.comando }}", "rightValue": "/ayuda",   "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "ayuda" }
+            { "value2": "/lectura" },
+            { "value2": "/cierre" },
+            { "value2": "/evento" }
           ]
         },
-        "fallbackOutput": "extra"
+        "fallbackOutput": 3
       },
-      "name": "Router Comandos",
+      "name": "Router A",
       "type": "n8n-nodes-base.switch",
-      "typeVersion": 3,
+      "typeVersion": 1,
       "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.comando }}",
+        "rules": {
+          "rules": [
+            { "value2": "/confirmar" },
+            { "value2": "/cancelar" },
+            { "value2": "/estado" },
+            { "value2": "/ayuda" }
+          ]
+        },
+        "fallbackOutput": 4
+      },
+      "name": "Router B",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [880, 500]
     },
     {
       "parameters": {
@@ -51,12 +68,12 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"servicio_id\": \"{{ $env.ENERGY_SERVICIO_ID }}\",\n  \"lectura_valor\": {{ $json.lectura }},\n  \"tipo\": \"lectura_diaria\",\n  \"fecha\": {{ $json.fecha ? '\"' + $json.fecha + '\"' : 'null' }},\n  \"notas\": \"{{ $json.nota }}\",\n  \"telegram_id\": {{ $json.telegram_id }}\n}",
-        "options": { "response": { "response": { "responseFormat": "json" } } }
+        "options": {}
       },
       "name": "POST lectura",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 160],
+      "position": [960, 60],
       "credentials": { "httpHeaderAuth": { "id": "2", "name": "Energy API Key" } }
     },
     {
@@ -73,7 +90,7 @@
       "name": "POST cierre",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 260],
+      "position": [960, 180],
       "credentials": { "httpHeaderAuth": { "id": "2", "name": "Energy API Key" } }
     },
     {
@@ -90,7 +107,7 @@
       "name": "POST evento",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 360],
+      "position": [960, 300],
       "credentials": { "httpHeaderAuth": { "id": "2", "name": "Energy API Key" } }
     },
     {
@@ -107,7 +124,7 @@
       "name": "POST confirmar",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 460],
+      "position": [1120, 420],
       "credentials": { "httpHeaderAuth": { "id": "2", "name": "Energy API Key" } }
     },
     {
@@ -124,7 +141,7 @@
       "name": "POST cancelar",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 560],
+      "position": [1120, 540],
       "credentials": { "httpHeaderAuth": { "id": "2", "name": "Energy API Key" } }
     },
     {
@@ -138,17 +155,17 @@
       "name": "GET estado",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 660],
+      "position": [1120, 660],
       "credentials": { "httpHeaderAuth": { "id": "2", "name": "Energy API Key" } }
     },
     {
       "parameters": {
-        "jsCode": "// Formatear respuesta del backend para Telegram\nconst data  = $input.first().json;\nconst input = $('Parsear Comando').first().json;\n\nlet texto = '';\n\nif (data.status === 'ok' && data.evento) {\n  const e = data.evento;\n  texto = `✅ Lectura registrada\\n📅 ${e.fecha}\\n⚡ ${parseInt(e.lectura_valor).toLocaleString()} kWh\\n📈 +${e.consumo_dia} kWh hoy\\n🔢 ${data.acumulado_kwh} kWh acumulados`;\n  if (data.promedio_dia) texto += `\\n📊 Promedio: ${data.promedio_dia} kWh/día`;\n} else if (data.status === 'pendiente') {\n  texto = data.mensaje;\n} else if (data.acumulado_kwh !== undefined) {\n  // respuesta de /estado\n  texto = `📊 Ciclo actual\\n📅 Inicio: ${data.fecha_inicio}\\n⚡ Última: ${data.ultima_lectura?.toLocaleString() || '—'} kWh\\n🔢 Acumulado: ${data.acumulado_kwh} kWh\\n📈 Promedio: ${data.promedio_dia || '—'} kWh/día\\n📆 ${data.dias_ciclo} días transcurridos`;\n  if (data.alerta) texto += `\\n\\n${data.alerta.nivel === 'critico' ? '🚨' : '⚠️'} ${data.alerta.mensaje}`;\n} else if (data.mensaje) {\n  texto = data.mensaje;\n} else {\n  texto = JSON.stringify(data, null, 2);\n}\n\nreturn [{ json: { chat_id: input.chat_id, text: texto } }];"
+        "jsCode": "const data = $input.first().json;\nconst input = $('Parsear Comando').first().json;\nlet texto = '';\nif (data.status === 'ok' && data.evento) {\n  const e = data.evento;\n  texto = `✅ Lectura registrada\\n📅 ${e.fecha}\\n⚡ ${parseInt(e.lectura_valor).toLocaleString()} kWh\\n📈 +${e.consumo_dia} kWh hoy\\n🔢 ${data.acumulado_kwh} kWh acumulados`;\n  if (data.promedio_dia) texto += `\\n📊 Promedio: ${data.promedio_dia} kWh/día`;\n} else if (data.status === 'pendiente') {\n  texto = data.mensaje;\n} else if (data.acumulado_kwh !== undefined) {\n  texto = `📊 Ciclo actual\\n📅 Inicio: ${data.fecha_inicio}\\n⚡ Última: ${data.ultima_lectura?.toLocaleString() || '—'} kWh\\n🔢 Acumulado: ${data.acumulado_kwh} kWh\\n📈 Promedio: ${data.promedio_dia || '—'} kWh/día\\n📆 ${data.dias_ciclo} días transcurridos`;\n  if (data.alerta) texto += `\\n\\n${data.alerta.nivel === 'critico' ? '🚨' : '⚠️'} ${data.alerta.mensaje}`;\n} else if (data.mensaje) {\n  texto = data.mensaje;\n} else {\n  texto = JSON.stringify(data, null, 2);\n}\nreturn [{ json: { chat_id: input.chat_id, text: texto } }];"
       },
       "name": "Formatear Respuesta",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 400]
+      "position": [1340, 300]
     },
     {
       "parameters": {
@@ -157,7 +174,7 @@
       "name": "Texto Ayuda",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, 800]
+      "position": [1120, 780]
     },
     {
       "parameters": {
@@ -166,7 +183,7 @@
       "name": "Respuesta Desconocido",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, 920]
+      "position": [1120, 900]
     },
     {
       "parameters": {
@@ -177,18 +194,23 @@
       "name": "Enviar Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1340, 400],
+      "position": [1560, 300],
       "credentials": { "telegramApi": { "id": "1", "name": "Telegram Energy Bot" } }
     }
   ],
   "connections": {
-    "Telegram Trigger":     { "main": [[{ "node": "Parsear Comando",       "type": "main", "index": 0 }]] },
-    "Parsear Comando":      { "main": [[{ "node": "Router Comandos",        "type": "main", "index": 0 }]] },
-    "Router Comandos": {
+    "Telegram Trigger":   { "main": [[{ "node": "Parsear Comando", "type": "main", "index": 0 }]] },
+    "Parsear Comando":    { "main": [[{ "node": "Router A", "type": "main", "index": 0 }]] },
+    "Router A": {
       "main": [
-        [{ "node": "POST lectura",          "type": "main", "index": 0 }],
-        [{ "node": "POST cierre",           "type": "main", "index": 0 }],
-        [{ "node": "POST evento",           "type": "main", "index": 0 }],
+        [{ "node": "POST lectura", "type": "main", "index": 0 }],
+        [{ "node": "POST cierre",  "type": "main", "index": 0 }],
+        [{ "node": "POST evento",  "type": "main", "index": 0 }],
+        [{ "node": "Router B",     "type": "main", "index": 0 }]
+      ]
+    },
+    "Router B": {
+      "main": [
         [{ "node": "POST confirmar",        "type": "main", "index": 0 }],
         [{ "node": "POST cancelar",         "type": "main", "index": 0 }],
         [{ "node": "GET estado",            "type": "main", "index": 0 }],
@@ -196,15 +218,15 @@
         [{ "node": "Respuesta Desconocido", "type": "main", "index": 0 }]
       ]
     },
-    "POST lectura":          { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
-    "POST cierre":           { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
-    "POST evento":           { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
-    "POST confirmar":        { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
-    "POST cancelar":         { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
-    "GET estado":            { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
-    "Formatear Respuesta":   { "main": [[{ "node": "Enviar Telegram",     "type": "main", "index": 0 }]] },
-    "Texto Ayuda":           { "main": [[{ "node": "Enviar Telegram",     "type": "main", "index": 0 }]] },
-    "Respuesta Desconocido": { "main": [[{ "node": "Enviar Telegram",     "type": "main", "index": 0 }]] }
+    "POST lectura":   { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
+    "POST cierre":    { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
+    "POST evento":    { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
+    "POST confirmar": { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
+    "POST cancelar":  { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
+    "GET estado":     { "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]] },
+    "Formatear Respuesta":   { "main": [[{ "node": "Enviar Telegram", "type": "main", "index": 0 }]] },
+    "Texto Ayuda":           { "main": [[{ "node": "Enviar Telegram", "type": "main", "index": 0 }]] },
+    "Respuesta Desconocido": { "main": [[{ "node": "Enviar Telegram", "type": "main", "index": 0 }]] }
   },
   "settings": { "executionOrder": "v1" },
   "staticData": null,
