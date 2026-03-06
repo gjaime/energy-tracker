@@ -65,7 +65,7 @@ SELECT
     s.usuario_id,
     c.fecha_inicio,
     c.fecha_fin,
-    c.dias_ciclo,
+    (c.fecha_fin - c.fecha_inicio)              AS dias_ciclo,
     c.lectura_inicial,
     c.lectura_final,
     c.lectura_final - c.lectura_inicial         AS consumo_total_kwh,
