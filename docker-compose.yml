@@ -95,6 +95,7 @@ services:
       N8N_BASIC_AUTH_ACTIVE:  true
       N8N_BASIC_AUTH_USER:    ${N8N_UI_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_UI_PASSWORD}
+      N8N_SECURE_COOKIE: false
       # Encriptación de credenciales guardadas
       N8N_ENCRYPTION_KEY:     ${N8N_ENCRYPTION_KEY}
       # Variables disponibles en los workflows
