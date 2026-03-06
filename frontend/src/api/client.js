@@ -26,7 +26,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       // Token expirado o inválido → limpiar sesión y redirigir al login
       localStorage.removeItem('energy_token')
-      localStorage.removeItem('cfe_user')
+      localStorage.removeItem('energy_user')
       window.location.href = '/login'
     }
     return Promise.reject(error)

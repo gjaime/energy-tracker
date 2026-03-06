@@ -41,7 +41,7 @@ Estas se inyectan automáticamente desde el `.env` via `docker-compose.yml`:
 
 Para obtener el `ENERGY_SERVICIO_ID` tras el primer deploy:
 ```bash
-docker compose exec database psql -U cfe_user -d energy_tracker \
+docker compose exec database psql -U energy_user -d energy_tracker \
   -c "SELECT id, alias FROM servicios;"
 ```
 

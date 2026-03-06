@@ -93,11 +93,11 @@ Después del primer deploy, obtener los UUIDs reales:
 
 ```bash
 # UUID del usuario admin (para N8N_SERVICE_USER_ID)
-docker compose exec database psql -U cfe_user -d energy_tracker \
+docker compose exec database psql -U energy_user -d energy_tracker \
   -c "SELECT id, email FROM usuarios;"
 
 # UUID del servicio CFE (para ENERGY_SERVICIO_ID)
-docker compose exec database psql -U cfe_user -d energy_tracker \
+docker compose exec database psql -U energy_user -d energy_tracker \
   -c "SELECT id, alias, numero_servicio FROM servicios;"
 ```
 
@@ -173,5 +173,5 @@ docker compose restart backend
 docker compose down -v && docker compose up -d
 
 # Entrar a psql
-docker compose exec database psql -U cfe_user -d energy_tracker
+docker compose exec database psql -U energy_user -d energy_tracker
 ```
