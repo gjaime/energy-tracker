@@ -683,4 +683,212 @@ router.post('/historial-xml', auth, upload.array('archivos', 30), async (req, re
   }
 })
 
+
+// ── POST /api/onboarding/recibo-nuevo ─────────────────────────────────────────
+// Sube el recibo más reciente: cierra el ciclo activo, abre el nuevo,
+// actualiza tarifas. Llama ajustarCicloPorRecibo igual que el flujo legacy.
+router.post('/recibo-nuevo', auth, upload.single('archivo'), async (req, res) => {
+  const { servicio_id } = req.body
+  if (!servicio_id || !req.file)
+    return res.status(400).json({ error: 'servicio_id y archivo son requeridos' })
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    // 1. Extraer datos del PDF con Claude
+    const datos = await extraerDatosConClaude(req.file)
+    if (!datos.fecha_lectura_cfe && datos.periodo_fin)
+      datos.fecha_lectura_cfe = datos.periodo_fin
+
+    if (!datos.fecha_lectura_cfe)
+      return res.status(422).json({ error: 'No se pudo determinar la fecha de corte del recibo' })
+
+    // 2. Verificar que no sea duplicado
+    const { rows: dup } = await client.query(
+      `SELECT id FROM recibos WHERE servicio_id=$1 AND fecha_lectura_cfe=$2`,
+      [servicio_id, datos.fecha_lectura_cfe]
+    )
+    if (dup.length) {
+      await client.query('ROLLBACK')
+      return res.status(409).json({
+        error: `Ya existe un recibo con fecha de corte ${datos.fecha_lectura_cfe}`,
+        duplicado: true,
+      })
+    }
+
+    // 3. Insertar recibo
+    const recibo = await insertarRecibo(client, servicio_id, datos)
+
+    // 4. Ajustar ciclos — cierra el activo, abre el nuevo
+    const resumenAjuste = await ajustarCicloPorRecibo(client, recibo)
+
+    // 5. Actualizar tarifas históricas si el recibo las trae
+    if (datos.tarifa_precio_basico && datos.tarifa_precio_excedente) {
+      const fechaCorte = new Date(datos.fecha_lectura_cfe)
+      const bimestre   = Math.ceil((fechaCorte.getMonth() + 1) / 2)
+      const anio       = fechaCorte.getFullYear()
+      await client.query(
+        `INSERT INTO tarifas_historicas
+           (tarifa_tipo, estado_rep, bimestre, anio,
+            precio_basico, precio_intermedio, precio_excedente,
+            limite_basico, limite_intermedio, dap, apoyo_gubernamental)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (tarifa_tipo, estado_rep, bimestre, anio) DO UPDATE SET
+           precio_basico       = EXCLUDED.precio_basico,
+           precio_intermedio   = EXCLUDED.precio_intermedio,
+           precio_excedente    = EXCLUDED.precio_excedente,
+           dap                 = EXCLUDED.dap,
+           apoyo_gubernamental = EXCLUDED.apoyo_gubernamental`,
+        [
+          '1', datos.estado_rep || 'Querétaro',
+          bimestre, anio,
+          datos.tarifa_precio_basico,
+          datos.tarifa_precio_intermedio,
+          datos.tarifa_precio_excedente,
+          datos.tarifa_limite_basico    || 150,
+          datos.tarifa_limite_intermedio || 280,
+          datos.dap                     || null,
+          datos.apoyo_gubernamental     || null,
+        ]
+      )
+    }
+
+    await client.query('COMMIT')
+    res.status(201).json({
+      ok: true,
+      recibo,
+      ajuste: resumenAjuste,
+      requiere_revision: (datos.confianza || 100) < 85,
+      confianza: datos.confianza || 100,
+    })
+
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('POST /onboarding/recibo-nuevo error:', err)
+    res.status(500).json({ error: 'Error al procesar el recibo', detalle: err.message })
+  } finally {
+    client.release()
+    if (req.file) fs.unlink(req.file.path, () => {})
+  }
+})
+
+
+// ── POST /api/onboarding/recibo-nuevo-xml ─────────────────────────────────────
+// Sube el recibo más reciente como XML/CFDI (sin Claude, 100% determinista)
+// Cierra el ciclo activo y abre el nuevo, igual que recibo-nuevo.
+router.post('/recibo-nuevo-xml', auth, upload.single('archivo'), async (req, res) => {
+  const { servicio_id } = req.body
+  if (!servicio_id || !req.file)
+    return res.status(400).json({ error: 'servicio_id y archivo requeridos' })
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    // 1. Parsear XML
+    const xml   = fs.readFileSync(req.file.path, 'utf8')
+    const datos = parsearXMLCFDI(xml)
+
+    if (!datos.fecha_lectura_cfe)
+      return res.status(422).json({ error: 'No se pudo determinar la fecha de corte del XML' })
+
+    // 2. Necesitamos lectura_anterior y lectura_actual
+    // Para el recibo más reciente, buscar ancla en DB
+    const { rows: existentes } = await client.query(
+      `SELECT fecha_lectura_cfe, lectura_actual, extraccion_revisada
+       FROM recibos WHERE servicio_id=$1
+       ORDER BY fecha_lectura_cfe DESC LIMIT 5`,
+      [servicio_id]
+    )
+    const ancla = existentes.find(r => r.extraccion_revisada) || existentes[0]
+    if (!ancla)
+      return res.status(422).json({
+        error: 'No hay recibos previos para anclar las lecturas. Sube primero los recibos históricos.',
+      })
+
+    datos.lectura_anterior = parseInt(ancla.lectura_actual)
+    datos.lectura_actual   = datos.lectura_anterior + datos.consumo_kwh
+
+    // 3. Verificar duplicado
+    const { rows: dup } = await client.query(
+      `SELECT id FROM recibos WHERE servicio_id=$1 AND fecha_lectura_cfe=$2`,
+      [servicio_id, datos.fecha_lectura_cfe]
+    )
+    if (dup.length) {
+      await client.query('ROLLBACK')
+      return res.status(409).json({
+        error: `Ya existe un recibo con fecha de corte ${datos.fecha_lectura_cfe}`,
+        duplicado: true,
+      })
+    }
+
+    // 4. Insertar recibo con confianza 100
+    const { rows: reciboRows } = await client.query(
+      `INSERT INTO recibos (
+        servicio_id, fecha_emision, fecha_lectura_cfe, periodo_inicio, periodo_fin,
+        lectura_anterior, lectura_actual,
+        tarifa_precio_basico, tarifa_precio_intermedio, tarifa_precio_excedente,
+        tarifa_limite_basico, tarifa_limite_intermedio,
+        cargo_suministro, cargo_distribucion, cargo_transmision,
+        cargo_cenace, cargo_energia, cargo_capacidad, cargo_scnmen,
+        apoyo_gubernamental, dap, subtotal, impuestos, total,
+        extraccion_confianza, extraccion_revisada
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,100,true)
+      RETURNING *`,
+      [
+        servicio_id, datos.fecha_emision, datos.fecha_lectura_cfe,
+        datos.periodo_inicio, datos.periodo_fin,
+        datos.lectura_anterior, datos.lectura_actual,
+        datos.tarifa_precio_basico,     datos.tarifa_precio_intermedio,  datos.tarifa_precio_excedente,
+        datos.tarifa_limite_basico,     datos.tarifa_limite_intermedio,
+        datos.cargo_suministro || null, datos.cargo_distribucion || null, datos.cargo_transmision || null,
+        datos.cargo_cenace    || null,  datos.cargo_energia      || null, datos.cargo_capacidad   || null,
+        datos.cargo_scnmen    || null,  datos.apoyo_gubernamental,
+        datos.dap, datos.subtotal, datos.impuestos, datos.total,
+      ]
+    )
+    const recibo = reciboRows[0]
+
+    // 5. Ajustar ciclos
+    const resumenAjuste = await ajustarCicloPorRecibo(client, recibo)
+
+    // 6. Actualizar tarifas históricas
+    if (datos.tarifa_precio_basico) {
+      const fechaCorte = new Date(datos.fecha_lectura_cfe)
+      const bimestre   = Math.ceil((fechaCorte.getMonth() + 1) / 2)
+      const anio       = fechaCorte.getFullYear()
+      await client.query(
+        `INSERT INTO tarifas_historicas
+           (tarifa_tipo, estado_rep, bimestre, anio,
+            precio_basico, precio_intermedio, precio_excedente,
+            limite_basico, limite_intermedio, dap, apoyo_gubernamental)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (tarifa_tipo, estado_rep, bimestre, anio) DO UPDATE SET
+           precio_basico     = EXCLUDED.precio_basico,
+           precio_intermedio = EXCLUDED.precio_intermedio,
+           precio_excedente  = EXCLUDED.precio_excedente,
+           dap               = EXCLUDED.dap`,
+        [
+          '1', 'Querétaro', bimestre, anio,
+          datos.tarifa_precio_basico, datos.tarifa_precio_intermedio, datos.tarifa_precio_excedente,
+          datos.tarifa_limite_basico || 150, datos.tarifa_limite_intermedio || 280,
+          datos.dap || null, datos.apoyo_gubernamental || null,
+        ]
+      )
+    }
+
+    await client.query('COMMIT')
+    res.status(201).json({ ok: true, recibo, ajuste: resumenAjuste, confianza: 100 })
+
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('POST /onboarding/recibo-nuevo-xml error:', err)
+    res.status(500).json({ error: 'Error al procesar el XML', detalle: err.message })
+  } finally {
+    client.release()
+    if (req.file) fs.unlink(req.file.path, () => {})
+  }
+})
+
 module.exports = router

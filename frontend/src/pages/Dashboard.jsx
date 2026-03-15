@@ -231,6 +231,7 @@ function TabRecibos({ ciclosHistoricos, servicioId, onGuardado }) {
   const [fileObj,    setFileObj]    = useState(null);
   const [datos,      setDatos]      = useState(null);
   const [drag,       setDrag]       = useState(false);
+  const [tipoRecibo, setTipoRecibo] = useState('pdf');
   const ref = useRef();
 
   async function handleFile(file) {
@@ -251,6 +252,26 @@ function TabRecibos({ ciclosHistoricos, servicioId, onGuardado }) {
     }
   }
 
+  async function handleXML(file) {
+    if (!file) return;
+    setError(null); setFileName(file.name); setFileObj(file); setProcessing(true);
+    try {
+      const fd = new FormData();
+      fd.append("archivo", file);
+      fd.append("servicio_id", servicioId);
+      const { data: result } = await api.post("/onboarding/recibo-nuevo-xml", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 60000,
+      });
+      if (onGuardado) onGuardado(result);
+      setStage("saved");
+    } catch(e) {
+      setError(e.response?.data?.error || "Error al procesar el XML");
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   async function guardar() {
     if (!fileObj || !servicioId) return;
     setProcessing(true); setError(null);
@@ -258,11 +279,11 @@ function TabRecibos({ ciclosHistoricos, servicioId, onGuardado }) {
       const fd = new FormData();
       fd.append("archivo", fileObj);
       fd.append("servicio_id", servicioId);
-      await api.post("/onboarding/historial", fd, {
+      const { data: result } = await api.post("/onboarding/recibo-nuevo", fd, {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 60000,
       });
-      if (onGuardado) onGuardado();
+      if (onGuardado) onGuardado(result);
       setStage("saved");
     } catch(e) {
       setError(e.response?.data?.error || "Error al guardar el recibo");
@@ -274,33 +295,62 @@ function TabRecibos({ ciclosHistoricos, servicioId, onGuardado }) {
   function resetear() { setStage("upload"); setDatos(null); setFileName(""); setFileObj(null); setError(null); }
   const upd = (k,v) => setDatos(d=>({...d,[k]:v}));
 
-  const onDrop  = useCallback(e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }, []);
+  const onDrop  = useCallback(e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (!f) return; tipoRecibo === 'xml' ? handleXML(f) : handleFile(f); }, [tipoRecibo]);
   const onDragOver = e => { e.preventDefault(); setDrag(true); };
   const onDragLeave= () => setDrag(false);
 
   if (stage === "upload") return (
     <div>
+      {/* Toggle PDF / XML */}
+      <div style={{display:"flex",gap:"8px",marginBottom:"14px"}}>
+        {[
+          {id:"pdf", icon:"📄", label:"PDF / Imagen", sub:"Extracción con Claude AI"},
+          {id:"xml", icon:"📋", label:"XML / CFDI",   sub:"100% exacto · sin revisión"},
+        ].map(t => (
+          <button key={t.id}
+            onClick={()=>{setTipoRecibo(t.id); setError(null); if(ref.current) ref.current.value="";}}
+            style={{flex:1,padding:"9px 8px",borderRadius:"6px",cursor:"pointer",border:"1px solid",
+              textAlign:"center",fontFamily:"inherit",
+              background:tipoRecibo===t.id?"#0a2a15":"transparent",
+              borderColor:tipoRecibo===t.id?"#1aff70":"#1d2430",
+              color:tipoRecibo===t.id?"#1aff70":"#3d5070"}}>
+            <div style={{fontSize:"12px",fontWeight:"700"}}>{t.icon} {t.label}</div>
+            <div style={{fontSize:"9px",marginTop:"2px"}}>{t.sub}</div>
+          </button>
+        ))}
+      </div>
       <div
         onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
         onClick={()=>!processing&&ref.current?.click()}
         style={{border:`2px dashed ${drag?"#1aff70":"#1d2430"}`,borderRadius:"12px",padding:"48px 32px",
           textAlign:"center",cursor:processing?"wait":"pointer",
           backgroundColor:drag?"#0d1f17":"#131922",transition:"all 0.2s"}}>
-        <input ref={ref} type="file" accept=".pdf,image/*" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
+        <input ref={ref} type="file"
+          accept={tipoRecibo==="xml"?".xml":".pdf,image/*"}
+          style={{display:"none"}}
+          onChange={e=>{ const f=e.target.files[0]; if(f) tipoRecibo==="xml"?handleXML(f):handleFile(f); }}/>
         {processing ? (
           <div>
             <div style={{fontSize:"28px",marginBottom:"10px",display:"inline-block",animation:"spin 1s linear infinite"}}>⚙️</div>
-            <div style={{fontSize:"12px",color:"#1aff70",fontWeight:"700",letterSpacing:"2px"}}>ANALIZANDO RECIBO...</div>
-            <div style={{fontSize:"10px",color:"#3d5070",marginTop:"5px"}}>Claude está extrayendo los datos</div>
+            <div style={{fontSize:"12px",color:"#1aff70",fontWeight:"700",letterSpacing:"2px"}}>
+              {tipoRecibo==="xml"?"PROCESANDO XML...":"ANALIZANDO RECIBO..."}
+            </div>
+            <div style={{fontSize:"10px",color:"#3d5070",marginTop:"5px"}}>
+              {tipoRecibo==="xml"?"Parseando CFDI...":"Claude está extrayendo los datos"}
+            </div>
           </div>
         ) : (
           <div>
-            <div style={{fontSize:"36px",marginBottom:"12px",opacity:0.5}}>📄</div>
-            <div style={{fontSize:"12px",color:"#dde4ef",fontWeight:"700",letterSpacing:"1px"}}>Arrastra el recibo CFE aquí</div>
-            <div style={{fontSize:"10px",color:"#3d5070",marginTop:"5px"}}>PDF o imagen (JPG, PNG) · Clic para seleccionar</div>
+            <div style={{fontSize:"36px",marginBottom:"12px",opacity:0.5}}>{tipoRecibo==="xml"?"📋":"📄"}</div>
+            <div style={{fontSize:"12px",color:"#dde4ef",fontWeight:"700",letterSpacing:"1px"}}>
+              {tipoRecibo==="xml"?"Arrastra el XML (CFDI) aquí":"Arrastra el recibo CFE aquí"}
+            </div>
+            <div style={{fontSize:"10px",color:"#3d5070",marginTop:"5px"}}>
+              {tipoRecibo==="xml"?"Archivo .xml del portal CFE · Clic para seleccionar":"PDF o imagen (JPG, PNG) · Clic para seleccionar"}
+            </div>
             <div style={{fontSize:"9px",color:"#3d5070",marginTop:"10px",backgroundColor:"#0e1520",
               borderRadius:"4px",padding:"4px 12px",display:"inline-block",letterSpacing:"1px"}}>
-              ✦ Powered by Claude — extracción automática
+              {tipoRecibo==="xml"?"✦ Datos exactos del SAT · sin IA":"✦ Powered by Claude — extracción automática"}
             </div>
           </div>
         )}
@@ -889,11 +939,12 @@ export default function Dashboard() {
   }));
 
   const navItems = [
-    {key:"dashboard",label:"📊  Panel"},
-    {key:"registros",label:"📝  Registros"},
-    {key:"historico",label:"📈  Histórico"},
-    {key:"tarifas",  label:"⚡  Tarifas"},
-    {key:"recibos",  label:"📄  Recibos"},
+    {key:"dashboard",      label:"📊  Panel"},
+    {key:"registros",      label:"📝  Registros"},
+    {key:"historico",      label:"📈  Histórico"},
+    {key:"tarifas",        label:"⚡  Tarifas"},
+    {key:"nuevo_recibo",   label:"🆕  Nuevo Recibo"},
+    {key:"hist_recibos",   label:"🧾  Recibos"},
   ];
 
   if (cargando) return (
@@ -1321,7 +1372,25 @@ export default function Dashboard() {
         )}
 
         {/* ══════════ RECIBOS ══════════ */}
-        {tab==="recibos" && (
+        {/* ══════════ NUEVO RECIBO ══════════ */}
+        {tab==="nuevo_recibo" && (
+          <div>
+            <div style={{marginBottom:"16px"}}>
+              <div style={{fontSize:"10px",color:"#5a6a7e",letterSpacing:"2px",marginBottom:"4px"}}>CERRAR CICLO ACTUAL</div>
+              <div style={{fontSize:"12px",color:"#3d5070",lineHeight:1.6}}>
+                Sube tu recibo más reciente. El sistema cerrará el ciclo activo, abrirá el nuevo y actualizará las tarifas automáticamente.
+              </div>
+            </div>
+            <TabRecibos
+              ciclosHistoricos={recibos}
+              servicioId={servicio?.id}
+              onGuardado={() => cargarDatos()}
+            />
+          </div>
+        )}
+
+        {/* ══════════ HISTORIAL RECIBOS ══════════ */}
+        {tab==="hist_recibos" && (
           <TabRecibosHistorial
             recibos={recibos}
             servicioId={servicio?.id}
