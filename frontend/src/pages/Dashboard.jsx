@@ -472,11 +472,12 @@ function FormularioLectura({ form, setForm, regs, handleLecturaChange, agregar, 
 // ─────────────────────────────────────────────────────────────
 
 function TabRecibosHistorial({ recibos, servicioId, onActualizado }) {
-  const [archivos,   setArchivos]   = useState([])
-  const [procesando, setProcesando] = useState(false)
-  const [resultado,  setResultado]  = useState(null)
-  const [error,      setError]      = useState(null)
-  const [drag,       setDrag]       = useState(false)
+  const [archivos,    setArchivos]   = useState([])
+  const [procesando,  setProcesando] = useState(false)
+  const [resultado,   setResultado]  = useState(null)
+  const [error,       setError]      = useState(null)
+  const [drag,        setDrag]       = useState(false)
+  const [tipoArchivo, setTipoArchivo] = useState('xml')
   const fileRef = useRef()
 
   const onDrop = (e) => {
@@ -491,13 +492,16 @@ function TabRecibosHistorial({ recibos, servicioId, onActualizado }) {
       const fd = new FormData()
       fd.append("servicio_id", servicioId)
       archivos.forEach(f => fd.append("archivos", f))
-      const { data } = await api.post("/recibos/historial", fd, {
+      const endpoint = tipoArchivo === "xml" ? "/onboarding/historial-xml" : "/recibos/historial"
+      const { data } = await api.post(endpoint, fd, {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 300000,
       })
-      setResultado(data)
+      const importados = data.importados || 0
+      const resumenNorm = data.resumen || { importados, duplicados: data.duplicados||0, huecos_rellenados: data.huecos_rellenados||0, errores: Array.isArray(data.errores)?data.errores.length:0 }
+      setResultado({ resumen: resumenNorm, importados: [], duplicados: [], errores: Array.isArray(data.errores)?data.errores:[] })
       setArchivos([])
-      if (data.resumen.importados > 0 && onActualizado) onActualizado()
+      if (resumenNorm.importados > 0 && onActualizado) onActualizado()
     } catch (e) {
       setError(e.response?.data?.error || "Error al procesar los recibos")
     } finally {
@@ -512,6 +516,18 @@ function TabRecibosHistorial({ recibos, servicioId, onActualizado }) {
           <div style={{fontSize:"10px",color:"#5a6a7e",letterSpacing:"2px",textTransform:"uppercase",marginBottom:"14px"}}>
             Cargar Recibos Históricos
           </div>
+          <div style={{display:"flex",gap:"8px",marginBottom:"14px"}}>
+            {[{id:"xml",icon:"📋",label:"XML / CFDI",sub:"Recomendado · 100% exacto"},{id:"pdf",icon:"📄",label:"PDF / Imagen",sub:"Extracción con Claude AI"}].map(t=>(
+              <button key={t.id} onClick={()=>{setTipoArchivo(t.id);setArchivos([]);if(fileRef.current)fileRef.current.value=""}}
+                style={{flex:1,padding:"9px 8px",borderRadius:"6px",cursor:"pointer",border:"1px solid",textAlign:"center",fontFamily:"inherit",
+                  background:tipoArchivo===t.id?"#0a2a15":"transparent",
+                  borderColor:tipoArchivo===t.id?"#1aff70":"#1d2430",
+                  color:tipoArchivo===t.id?"#1aff70":"#3d5070"}}>
+                <div style={{fontSize:"12px",fontWeight:"700"}}>{t.icon} {t.label}</div>
+                <div style={{fontSize:"9px",marginTop:"2px"}}>{t.sub}</div>
+              </button>
+            ))}
+          </div>
           <div
             onDrop={onDrop}
             onDragOver={e=>{e.preventDefault();setDrag(true)}}
@@ -520,7 +536,7 @@ function TabRecibosHistorial({ recibos, servicioId, onActualizado }) {
             style={{border:`2px dashed ${drag?"#1aff70":"#1d2430"}`,borderRadius:"10px",
               padding:"36px",textAlign:"center",cursor:procesando?"wait":"pointer",
               backgroundColor:drag?"#0d1f17":"#131922",transition:"all 0.2s",marginBottom:"14px"}}>
-            <input ref={fileRef} type="file" accept=".pdf,image/*" multiple
+            <input ref={fileRef} type="file" accept={tipoArchivo==="xml"?".xml":".pdf,image/*"} multiple
               style={{display:"none"}} onChange={e=>setArchivos(Array.from(e.target.files))}/>
             {procesando ? (
               <div>
@@ -713,7 +729,6 @@ export default function Dashboard() {
       if (!svcs[0]) { setCargando(false); return; }
       const svc = svcs[0];
       setServicio(svc);
-      setCicloInfo({ inicio: svc.fecha_alta?.split("T")[0] || new Date().toISOString().split("T")[0], dias_est: 60 });
 
       const [evRes, recRes, ciclosRes] = await Promise.all([
         api.get("/lecturas", { params: { servicio_id: svc.id } }),
@@ -766,11 +781,11 @@ export default function Dashboard() {
         });
       }
 
-      // ciclo abierto
-      const fechaInicio = svc.fecha_alta
-        ? svc.fecha_alta.split("T")[0]
-        : (mapped[0]?.fecha || new Date().toISOString().split("T")[0]);
-      setCicloInfo({ inicio: fechaInicio, dias_est: 60 });
+      // ciclo abierto — solo setear si no se seteó ya desde cicloActivo
+      if (!cicloActivo) {
+        const fechaInicio = mapped[0]?.fecha || new Date().toISOString().split("T")[0];
+        setCicloInfo({ inicio: fechaInicio, dias_est: 60 });
+      }
 
     } catch(e) {
       console.error("Error cargando datos:", e);
@@ -827,7 +842,8 @@ export default function Dashboard() {
     const inicio = sorted[0];
     const ultima = sorted[sorted.length-1];
     const kwh    = ultima.lectura - inicio.lectura;
-    const dias   = Math.max(1, daysBetween(cicloInfo?.inicio || inicio.fecha, ultima.fecha));
+    const hoy    = new Date().toISOString().slice(0,10);
+    const dias   = Math.max(1, daysBetween(cicloInfo?.inicio || inicio.fecha, hoy));
     const reales = sorted.filter(r => !r.estimada);
     let kwhDia = 0;
     if (reales.length >= 2) {

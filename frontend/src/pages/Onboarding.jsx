@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   extraerRecibo, iniciarPerfil,
-  subirHistorial, marcarOnboardingCompleto
+  subirHistorial, subirHistorialXML, marcarOnboardingCompleto
 } from '../api/onboarding'
 
 export default function Onboarding() {
@@ -19,6 +19,7 @@ export default function Onboarding() {
   const [resumenInicio, setResumenInicio] = useState(null)
   const [archivosHist, setArchivosHist]   = useState([])
   const [resumenHist, setResumenHist]     = useState(null)
+  const [tipoHistorial, setTipoHistorial] = useState('xml') // 'xml' | 'pdf'
   const [error, setError]        = useState(null)
 
   const fileRef  = useRef()
@@ -91,7 +92,8 @@ export default function Onboarding() {
     setProcesando(true)
     setError(null)
     try {
-      const result = await subirHistorial(servicioId, archivosHist)
+      const fn = tipoHistorial === 'xml' ? subirHistorialXML : subirHistorial
+      const result = await fn(servicioId, archivosHist)
       await finalizar(result)
     } catch (err) {
       setError(err.response?.data?.error || 'Error al procesar los recibos históricos')
@@ -258,17 +260,53 @@ export default function Onboarding() {
 
             {error && <ErrorBox msg={error} onClose={() => setError(null)} />}
 
+            {/* Toggle XML / PDF */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              <button
+                onClick={() => { setTipoHistorial('xml'); setArchivosHist([]); if (fileRefH.current) fileRefH.current.value = '' }}
+                style={{
+                  flex: 1, padding: '9px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold',
+                  cursor: 'pointer', border: '1px solid',
+                  background: tipoHistorial === 'xml' ? '#0a2a15' : 'transparent',
+                  borderColor: tipoHistorial === 'xml' ? '#1aff70' : '#1d2430',
+                  color: tipoHistorial === 'xml' ? '#1aff70' : '#3d5070',
+                }}
+              >
+                📋 XML / CFDI
+                <span style={{ display: 'block', fontSize: '10px', fontWeight: 'normal', marginTop: '2px', color: tipoHistorial === 'xml' ? '#1aff70' : '#3d5070' }}>
+                  Recomendado · 100% exacto
+                </span>
+              </button>
+              <button
+                onClick={() => { setTipoHistorial('pdf'); setArchivosHist([]); if (fileRefH.current) fileRefH.current.value = '' }}
+                style={{
+                  flex: 1, padding: '9px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold',
+                  cursor: 'pointer', border: '1px solid',
+                  background: tipoHistorial === 'pdf' ? '#0a2a15' : 'transparent',
+                  borderColor: tipoHistorial === 'pdf' ? '#1aff70' : '#1d2430',
+                  color: tipoHistorial === 'pdf' ? '#1aff70' : '#3d5070',
+                }}
+              >
+                📄 PDF / Imagen
+                <span style={{ display: 'block', fontSize: '10px', fontWeight: 'normal', marginTop: '2px', color: tipoHistorial === 'pdf' ? '#1aff70' : '#3d5070' }}>
+                  Extracción con Claude AI
+                </span>
+              </button>
+            </div>
+
             <label style={{
               display: 'block', background: '#0f1923',
-              border: '2px dashed #1d2430', borderRadius: '12px',
-              padding: '32px', textAlign: 'center',
+              border: `2px dashed ${archivosHist.length > 0 ? '#1aff70' : '#1d2430'}`,
+              borderRadius: '12px', padding: '32px', textAlign: 'center',
               cursor: procesando ? 'default' : 'pointer', marginBottom: '16px',
             }}>
               {procesando ? (
                 <>
                   <div style={{ fontSize: '28px', marginBottom: '10px' }}>⏳</div>
                   <p style={{ color: '#1aff70', fontSize: '14px', margin: 0 }}>Procesando {archivosHist.length} recibos…</p>
-                  <p style={{ color: '#3d5070', fontSize: '12px', margin: '4px 0 0' }}>esto puede tardar un momento</p>
+                  <p style={{ color: '#3d5070', fontSize: '12px', margin: '4px 0 0' }}>
+                    {tipoHistorial === 'xml' ? 'parseando CFDIs…' : 'analizando con Claude AI…'}
+                  </p>
                 </>
               ) : archivosHist.length > 0 ? (
                 <>
@@ -280,12 +318,24 @@ export default function Onboarding() {
                 </>
               ) : (
                 <>
-                  <div style={{ fontSize: '28px', marginBottom: '8px' }}>📂</div>
-                  <p style={{ color: '#e2e8f0', fontSize: '14px', margin: '0 0 4px' }}>Seleccionar recibos anteriores</p>
-                  <p style={{ color: '#3d5070', fontSize: '12px', margin: 0 }}>Varios archivos a la vez · PDF o imagen</p>
+                  <div style={{ fontSize: '28px', marginBottom: '8px' }}>{tipoHistorial === 'xml' ? '📋' : '📂'}</div>
+                  <p style={{ color: '#e2e8f0', fontSize: '14px', margin: '0 0 4px' }}>
+                    {tipoHistorial === 'xml' ? 'Seleccionar archivos XML (CFDI)' : 'Seleccionar recibos PDF'}
+                  </p>
+                  <p style={{ color: '#3d5070', fontSize: '12px', margin: 0 }}>
+                    {tipoHistorial === 'xml' ? 'Descárgalos desde Mi CFE · varios a la vez' : 'Varios archivos a la vez · PDF o imagen'}
+                  </p>
                 </>
               )}
-              <input ref={fileRefH} type="file" accept=".pdf,image/*" multiple onChange={handleArchivosHist} style={{ display: 'none' }} disabled={procesando} />
+              <input
+                ref={fileRefH}
+                type="file"
+                accept={tipoHistorial === 'xml' ? '.xml' : '.pdf,image/*'}
+                multiple
+                onChange={handleArchivosHist}
+                style={{ display: 'none' }}
+                disabled={procesando}
+              />
             </label>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -295,7 +345,7 @@ export default function Onboarding() {
               <button onClick={handleSubirHistorial} style={btnPrimario} disabled={procesando}>
                 {procesando ? 'Procesando…'
                   : archivosHist.length > 0
-                    ? `Subir ${archivosHist.length} recibo${archivosHist.length !== 1 ? 's' : ''}`
+                    ? `Subir ${archivosHist.length} ${tipoHistorial === 'xml' ? 'XML' : 'recibo'}${archivosHist.length !== 1 ? 's' : ''}`
                     : 'Continuar ›'}
               </button>
             </div>

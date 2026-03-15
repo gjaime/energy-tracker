@@ -52,7 +52,7 @@ async function insertarRecibo(client, servicioId, datos) {
     ) RETURNING *`,
     [
       servicioId,
-      datos.fecha_emision, datos.fecha_lectura_cfe, datos.periodo_inicio, datos.periodo_fin,
+      datos.fecha_emision, datos.fecha_lectura_cfe || datos.periodo_fin, datos.periodo_inicio, datos.periodo_fin,
       datos.lectura_anterior, datos.lectura_actual,
       datos.tarifa_precio_basico, datos.tarifa_precio_intermedio, datos.tarifa_precio_excedente,
       datos.tarifa_limite_basico, datos.tarifa_limite_intermedio,
@@ -133,7 +133,7 @@ router.post('/iniciar', auth, upload.single('archivo'), async (req, res) => {
     const { rows: cicloRows } = await client.query(
       `INSERT INTO ciclos (servicio_id, fecha_inicio, lectura_inicial, estado)
        VALUES ($1,$2,$3,'abierto') RETURNING id`,
-      [servicioId, datos.fecha_lectura_cfe, datos.lectura_actual]
+      [servicioId, datos.fecha_lectura_cfe || datos.periodo_fin, datos.lectura_actual]
     )
     const cicloActivoId = cicloRows[0].id
 
@@ -284,5 +284,304 @@ cargo_alumbrado_publico, cargo_aportaciones, apoyo_gubernamental (decimales),
 dap (decimal), cargos_adicionales (array [{nombre, importe}]),
 subtotal (decimal), impuestos (decimal), total (decimal, requerido),
 confianza (0-100 según qué tan legibles están los datos).`
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS — Parser de CFDI CFE (sin Claude, 100% determinista)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MESES_CFE = {
+  ENE:'01',FEB:'02',MAR:'03',ABR:'04',MAY:'05',JUN:'06',
+  JUL:'07',AGO:'08',SEP:'09',OCT:'10',NOV:'11',DIC:'12'
+}
+
+function parseFechaCFE(str) {
+  // "29 DIC 25" → "2025-12-29"
+  const m = (str || '').trim().match(/^(\d+)\s+(\w+)\s+(\d+)$/)
+  if (!m) return null
+  const mes = MESES_CFE[m[2].toUpperCase()]
+  if (!mes) return null
+  return `20${m[3]}-${mes}-${m[1].padStart(2,'0')}`
+}
+
+function parsearXMLCFDI(xml) {
+  const tag  = (t) => { const m = xml.match(new RegExp(`<${t}>([^<]+)</${t}>`));  return m ? m[1].trim() : null }
+  const attr = (el, a) => { const m = xml.match(new RegExp(`${el}[^>]*\\s${a}="([^"]*)"`)); return m ? m[1] : null }
+
+  // ── Cabecera CFDI ──────────────────────────────────────────────────────────
+  const fechaEmision  = (attr('cfdi:Comprobante', 'Fecha') || '').split('T')[0] || null
+  const subtotal      = parseFloat(attr('cfdi:Comprobante', 'SubTotal') || '0')
+  const total         = parseFloat(attr('cfdi:Comprobante', 'Total')    || '0')
+
+  // IVA (Traslado Impuesto="002")
+  const ivaM = xml.match(/Impuesto="002"[^>]*Importe="([^"]*)"/)
+            || xml.match(/Importe="([^"]*)"[^>]*Impuesto="002"/)
+  const impuestos = ivaM ? parseFloat(ivaM[1]) : parseFloat((total - subtotal).toFixed(2))
+
+  // DAP (Concepto Descripcion="DAP")
+  const dapM = xml.match(/Descripcion="DAP"[^>]*Importe="([^"]*)"/)
+            || xml.match(/Importe="([^"]*)"[^>]*Descripcion="DAP"/)
+  const dap  = dapM ? parseFloat(dapM[1]) : null
+
+  // ── clsRegArchFact ──────────────────────────────────────────────────────────
+  const kwb01       = parseInt(tag('KWB01')          || '0')
+  const kwi01       = parseInt(tag('KWI01')          || '0')
+  const consumoKwh  = kwb01 + kwi01
+  const diasPeriodo = parseInt(tag('DIASXPERIODO1')  || '60')
+
+  const pBasico       = parseFloat(tag('PRECIO_ESCALON1_1') || '0') || null
+  const pIntermedio   = parseFloat(tag('PRECIO_ESCALON1_2') || '0') || null
+  const pExcedente    = parseFloat(tag('PRECIO_ESCALON1_3') || '0') || null
+  const limBasico     = parseInt(tag('KWH_ESCALON1_1')      || '0') || null
+  const limIntermedio = limBasico && parseInt(tag('KWH_ESCALON1_2') || '0')
+                        ? limBasico + parseInt(tag('KWH_ESCALON1_2'))
+                        : null
+
+  const apoyoRaw  = parseFloat(tag('AportacionGub') || '0')
+  const apoyoGub  = apoyoRaw > 0 ? apoyoRaw : null
+
+  // Cargos MEM: MOTIVO_REG_N → campo
+  const MEM_MAP = { ES1:'cargo_suministro', ED1:'cargo_distribucion', ET1:'cargo_transmision',
+                    EC1:'cargo_cenace',     EG1:'cargo_energia',      EIK:'cargo_capacidad',  EM1:'cargo_scnmen' }
+  const cargos = {}
+  for (let i = 1; i <= 10; i++) {
+    const motivo  = tag(`MOTIVO_REG_${i}`)
+    const importe = parseFloat(tag(`IMPTE_TOT_REG_${i}`) || '0')
+    if (motivo && MEM_MAP[motivo] && importe > 0) cargos[MEM_MAP[motivo]] = importe
+  }
+
+  // ── Derivar periodo desde FacturaAnt1 ─────────────────────────────────────
+  // FacturaAnt1 = "del DD MMM AA al DD MMM AA" → periodoInicio = fin de esa factura
+  const factAnt1 = tag('FacturaAnt1')
+  let periodoInicio = null
+  if (factAnt1) {
+    const m = factAnt1.match(/al\s+(\d+\s+\w+\s+\d+)\s*$/)
+    if (m) periodoInicio = parseFechaCFE(m[1])
+  }
+
+  let periodoFin = null
+  if (periodoInicio) {
+    const d = new Date(periodoInicio + 'T12:00:00Z')
+    d.setUTCDate(d.getUTCDate() + diasPeriodo)
+    periodoFin = d.toISOString().split('T')[0]
+  } else if (fechaEmision) {
+    // fallback: fecha_emision - 2 días
+    const d = new Date(fechaEmision + 'T12:00:00Z')
+    d.setUTCDate(d.getUTCDate() - 2)
+    periodoFin = d.toISOString().split('T')[0]
+    const d2 = new Date(periodoFin + 'T12:00:00Z')
+    d2.setUTCDate(d2.getUTCDate() - diasPeriodo)
+    periodoInicio = d2.toISOString().split('T')[0]
+  }
+
+  return {
+    fecha_emision:              fechaEmision,
+    fecha_lectura_cfe:          periodoFin,
+    periodo_inicio:             periodoInicio,
+    periodo_fin:                periodoFin,
+    consumo_kwh:                consumoKwh,
+    tarifa_precio_basico:       pBasico,
+    tarifa_precio_intermedio:   pIntermedio,
+    tarifa_precio_excedente:    pExcedente,
+    tarifa_limite_basico:       limBasico,
+    tarifa_limite_intermedio:   limIntermedio,
+    apoyo_gubernamental:        apoyoGub,
+    dap,
+    subtotal,
+    impuestos,
+    total,
+    ...cargos,
+  }
+}
+
+// ── POST /api/onboarding/historial-xml ────────────────────────────────────────
+// Acepta múltiples CFDIs XML de CFE, los parsea deterministamente (sin Claude)
+// y reconstruye el histórico de ciclos/recibos.
+router.post('/historial-xml', auth, upload.array('archivos', 30), async (req, res) => {
+  const { servicio_id } = req.body
+  if (!servicio_id || !req.files?.length)
+    return res.status(400).json({ error: 'servicio_id y archivos son requeridos' })
+
+  const client = await pool.connect()
+  const resultado = { importados: 0, duplicados: 0, errores: [], huecos_rellenados: 0 }
+
+  try {
+    await client.query('BEGIN')
+
+    // 1. Parsear todos los XMLs
+    const parsed = []
+    for (const file of req.files) {
+      try {
+        const content = fs.readFileSync(file.path, 'utf8')
+        const datos   = parsearXMLCFDI(content)
+        if (!datos.fecha_lectura_cfe) throw new Error('No se pudo determinar fecha_lectura_cfe')
+        datos._nombre = file.originalname
+        parsed.push(datos)
+      } catch (e) {
+        resultado.errores.push({ archivo: file.originalname, error: e.message })
+      }
+    }
+
+    if (!parsed.length) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'Ningún XML válido', ...resultado })
+    }
+
+    // 2. Ordenar de más antiguo a más reciente
+    parsed.sort((a, b) => new Date(a.fecha_lectura_cfe) - new Date(b.fecha_lectura_cfe))
+
+    // 3. Detectar duplicados y recibos existentes para encadenar lecturas
+    const { rows: existentes } = await client.query(
+      `SELECT fecha_lectura_cfe::text, lectura_anterior, lectura_actual
+       FROM recibos WHERE servicio_id=$1 ORDER BY fecha_lectura_cfe`,
+      [servicio_id]
+    )
+    const existenteMap = {}
+    existentes.forEach(r => existenteMap[r.fecha_lectura_cfe] = r)
+
+    // 4. Encadenar lecturas
+    // Buscar ancla: el XML más reciente que ya esté en DB nos da lectura_actual
+    let anclaActual = null
+    let anclaIdx    = -1
+    for (let i = parsed.length - 1; i >= 0; i--) {
+      const key = parsed[i].fecha_lectura_cfe
+      if (existenteMap[key]) { anclaActual = parseInt(existenteMap[key].lectura_actual); anclaIdx = i; break }
+    }
+    // Si no hay ancla en DB, usar el recibo más reciente existente (aunque sea de otro período)
+    if (anclaActual === null && existentes.length) {
+      anclaActual = parseInt(existentes[existentes.length - 1].lectura_actual)
+      anclaIdx    = parsed.length  // ancla "después" del último XML
+    }
+
+    if (anclaActual !== null) {
+      // Cadena hacia atrás (desde ancla hacia el pasado)
+      let lecActual = anclaActual
+      for (let i = (anclaIdx === parsed.length ? parsed.length - 1 : anclaIdx - 1); i >= 0; i--) {
+        parsed[i].lectura_actual   = lecActual
+        parsed[i].lectura_anterior = lecActual - parsed[i].consumo_kwh
+        lecActual = parsed[i].lectura_anterior
+      }
+      // Cadena hacia adelante (si hay XMLs más nuevos que el ancla)
+      if (anclaIdx < parsed.length) {
+        let lecPrev = anclaActual
+        for (let i = anclaIdx + 1; i < parsed.length; i++) {
+          parsed[i].lectura_anterior = lecPrev
+          parsed[i].lectura_actual   = lecPrev + parsed[i].consumo_kwh
+          lecPrev = parsed[i].lectura_actual
+        }
+      }
+    } else {
+      // Sin ancla: encadenar desde 0 (degradado, pero funcional)
+      let running = 0
+      for (const p of parsed) {
+        p.lectura_anterior = running
+        p.lectura_actual   = running + p.consumo_kwh
+        running = p.lectura_actual
+      }
+    }
+
+    // 5. Insertar cada recibo y crear ciclos históricos directamente
+    // Obtener el ciclo activo actual para no tocarlo con recibos históricos
+    const { rows: ciclosActivos } = await client.query(
+      `SELECT id, fecha_inicio FROM ciclos WHERE servicio_id=$1 AND estado='abierto' LIMIT 1`,
+      [servicio_id]
+    )
+    const cicloActivoId = ciclosActivos[0]?.id || null
+
+    for (let idx = 0; idx < parsed.length; idx++) {
+      const datos = parsed[idx]
+      if (existenteMap[datos.fecha_lectura_cfe]) { resultado.duplicados++; continue }
+      if (datos.lectura_anterior == null || datos.lectura_actual == null) {
+        resultado.errores.push({ archivo: datos._nombre, error: 'No se pudo determinar lecturas' }); continue
+      }
+      try {
+        // Insertar recibo
+        const { rows: reciboRows } = await client.query(
+          `INSERT INTO recibos (
+            servicio_id, fecha_emision, fecha_lectura_cfe, periodo_inicio, periodo_fin,
+            lectura_anterior, lectura_actual,
+            tarifa_precio_basico, tarifa_precio_intermedio, tarifa_precio_excedente,
+            tarifa_limite_basico, tarifa_limite_intermedio,
+            cargo_suministro, cargo_distribucion, cargo_transmision,
+            cargo_cenace, cargo_energia, cargo_capacidad, cargo_scnmen,
+            apoyo_gubernamental, dap, subtotal, impuestos, total,
+            extraccion_confianza
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,100)
+          RETURNING *`,
+          [
+            servicio_id, datos.fecha_emision, datos.fecha_lectura_cfe,
+            datos.periodo_inicio, datos.periodo_fin,
+            datos.lectura_anterior, datos.lectura_actual,
+            datos.tarifa_precio_basico,     datos.tarifa_precio_intermedio,  datos.tarifa_precio_excedente,
+            datos.tarifa_limite_basico,     datos.tarifa_limite_intermedio,
+            datos.cargo_suministro || null, datos.cargo_distribucion || null, datos.cargo_transmision || null,
+            datos.cargo_cenace    || null,  datos.cargo_energia      || null, datos.cargo_capacidad   || null,
+            datos.cargo_scnmen    || null,  datos.apoyo_gubernamental,
+            datos.dap, datos.subtotal, datos.impuestos, datos.total,
+          ]
+        )
+        const recibo = reciboRows[0]
+
+        // Verificar si ya existe un ciclo que cubra este período
+        const { rows: cicloExist } = await client.query(
+          `SELECT id FROM ciclos
+           WHERE servicio_id=$1
+             AND fecha_inicio <= $2::date
+             AND (fecha_fin >= $2::date OR fecha_fin IS NULL)
+           LIMIT 1`,
+          [servicio_id, datos.fecha_lectura_cfe]
+        )
+
+        if (cicloExist.length === 0) {
+          // Crear ciclo cerrado histórico directamente
+          const fechaInicio = datos.periodo_inicio || datos.fecha_lectura_cfe
+          await client.query(
+            `INSERT INTO ciclos
+               (servicio_id, fecha_inicio, fecha_fin, lectura_inicial, lectura_final,
+                estado, recibo_id, fuente_cierre)
+             VALUES ($1,$2,$3,$4,$5,'cerrado',$6,'recibo_importado')`,
+            [servicio_id, fechaInicio, datos.fecha_lectura_cfe,
+             datos.lectura_anterior, datos.lectura_actual, recibo.id]
+          )
+        } else if (cicloExist[0].id !== cicloActivoId) {
+          // Actualizar ciclo existente cerrado con el recibo_id
+          await client.query(
+            `UPDATE ciclos SET recibo_id=$1 WHERE id=$2`,
+            [recibo.id, cicloExist[0].id]
+          )
+        }
+
+        resultado.importados++
+      } catch (e) {
+        resultado.errores.push({ archivo: datos._nombre, error: e.message })
+      }
+    }
+
+    // Actualizar lectura_inicial del ciclo activo con la última lectura de los XMLs
+    // Solo si realmente se importaron recibos nuevos
+    if (cicloActivoId && resultado.importados > 0) {
+      const nuevosParsed = parsed.filter(p => !existenteMap[p.fecha_lectura_cfe])
+      const ultimo = nuevosParsed[nuevosParsed.length - 1]
+      if (ultimo?.lectura_actual != null) {
+        await client.query(
+          `UPDATE ciclos SET lectura_inicial=$1 WHERE id=$2 AND estado='abierto'`,
+          [ultimo.lectura_actual, cicloActivoId]
+        )
+      }
+    }
+
+    await client.query('COMMIT')
+    res.json({ ok: true, ...resultado })
+
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('POST /onboarding/historial-xml error:', err)
+    res.status(500).json({ error: 'Error al procesar XMLs', detalle: err.message })
+  } finally {
+    client.release()
+    req.files?.forEach(f => fs.unlink(f.path, () => {}))
+  }
+})
 
 module.exports = router
