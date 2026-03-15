@@ -80,8 +80,18 @@ function buildSegmentoEstimado(desde, hasta, label) {
   return estimados
 }
 
+function normalizarFecha(f) {
+  if (!f) return f
+  // PostgreSQL devuelve DATE como objeto Date en node-postgres
+  if (f instanceof Date) return f.toISOString().slice(0, 10)
+  // También puede llegar como string timestamp
+  return String(f).slice(0, 10)
+}
+
 function generarEstimados(registrosExistentes, nuevaEntrada) {
-  const sorted = [...registrosExistentes].sort((a, b) => a.fecha.localeCompare(b.fecha))
+  const sorted = [...registrosExistentes]
+    .map(r => ({ ...r, fecha: normalizarFecha(r.fecha) }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha))
   const ultima = sorted[sorted.length - 1]
   if (!ultima) return []
 

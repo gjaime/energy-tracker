@@ -470,6 +470,223 @@ function FormularioLectura({ form, setForm, regs, handleLecturaChange, agregar, 
 // ─────────────────────────────────────────────────────────────
 // APP PRINCIPAL
 // ─────────────────────────────────────────────────────────────
+
+function TabRecibosHistorial({ recibos, servicioId, onActualizado }) {
+  const [archivos,   setArchivos]   = useState([])
+  const [procesando, setProcesando] = useState(false)
+  const [resultado,  setResultado]  = useState(null)
+  const [error,      setError]      = useState(null)
+  const [drag,       setDrag]       = useState(false)
+  const fileRef = useRef()
+
+  const onDrop = (e) => {
+    e.preventDefault(); setDrag(false)
+    setArchivos(Array.from(e.dataTransfer.files))
+  }
+
+  const handleSubir = async () => {
+    if (!archivos.length || !servicioId) return
+    setProcesando(true); setError(null); setResultado(null)
+    try {
+      const fd = new FormData()
+      fd.append("servicio_id", servicioId)
+      archivos.forEach(f => fd.append("archivos", f))
+      const { data } = await api.post("/recibos/historial", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 300000,
+      })
+      setResultado(data)
+      setArchivos([])
+      if (data.resumen.importados > 0 && onActualizado) onActualizado()
+    } catch (e) {
+      setError(e.response?.data?.error || "Error al procesar los recibos")
+    } finally {
+      setProcesando(false)
+    }
+  }
+
+  return (
+    <div>
+      {!resultado && (
+        <div style={{...S.card(), marginBottom:"20px"}}>
+          <div style={{fontSize:"10px",color:"#5a6a7e",letterSpacing:"2px",textTransform:"uppercase",marginBottom:"14px"}}>
+            Cargar Recibos Históricos
+          </div>
+          <div
+            onDrop={onDrop}
+            onDragOver={e=>{e.preventDefault();setDrag(true)}}
+            onDragLeave={()=>setDrag(false)}
+            onClick={()=>!procesando&&fileRef.current?.click()}
+            style={{border:`2px dashed ${drag?"#1aff70":"#1d2430"}`,borderRadius:"10px",
+              padding:"36px",textAlign:"center",cursor:procesando?"wait":"pointer",
+              backgroundColor:drag?"#0d1f17":"#131922",transition:"all 0.2s",marginBottom:"14px"}}>
+            <input ref={fileRef} type="file" accept=".pdf,image/*" multiple
+              style={{display:"none"}} onChange={e=>setArchivos(Array.from(e.target.files))}/>
+            {procesando ? (
+              <div>
+                <div style={{fontSize:"28px",marginBottom:"10px",display:"inline-block",animation:"spin 1s linear infinite"}}>⚙️</div>
+                <div style={{fontSize:"12px",color:"#1aff70",fontWeight:"700",letterSpacing:"2px"}}>PROCESANDO...</div>
+                <div style={{fontSize:"10px",color:"#3d5070",marginTop:"5px"}}>Claude extrayendo datos</div>
+              </div>
+            ) : archivos.length > 0 ? (
+              <div>
+                <div style={{fontSize:"28px",marginBottom:"8px"}}>📑</div>
+                <div style={{fontSize:"13px",color:"#1aff70",fontWeight:"700",marginBottom:"4px"}}>
+                  {archivos.length} archivo{archivos.length!==1?"s":""} seleccionado{archivos.length!==1?"s":""}
+                </div>
+                <div style={{fontSize:"10px",color:"#3d5070"}}>Haz clic para cambiar</div>
+              </div>
+            ) : (
+              <div>
+                <div style={{fontSize:"36px",marginBottom:"12px",opacity:0.5}}>📂</div>
+                <div style={{fontSize:"12px",color:"#dde4ef",fontWeight:"700",marginBottom:"5px"}}>
+                  Arrastra tus recibos CFE aquí
+                </div>
+                <div style={{fontSize:"10px",color:"#3d5070",marginBottom:"10px"}}>
+                  PDF o imagen · varios archivos · se ordenan automáticamente
+                </div>
+                <div style={{fontSize:"9px",color:"#3d5070",backgroundColor:"#0e1520",
+                  borderRadius:"4px",padding:"4px 12px",display:"inline-block",letterSpacing:"1px"}}>
+                  ✦ Duplicados detectados automáticamente
+                </div>
+              </div>
+            )}
+          </div>
+          {error && (
+            <div style={{backgroundColor:"#2d0f0f",border:"1px solid #ef444440",borderRadius:"6px",
+              padding:"10px 14px",color:"#ef4444",fontSize:"11px",marginBottom:"12px"}}>❌ {error}</div>
+          )}
+          <div style={{display:"flex",gap:"10px",justifyContent:"flex-end"}}>
+            {archivos.length > 0 && (
+              <button onClick={()=>setArchivos([])} style={{background:"none",border:"1px solid #1d2430",
+                color:"#5a6a7e",padding:"8px 16px",borderRadius:"4px",fontSize:"11px",cursor:"pointer",fontFamily:"inherit"}}>
+                Limpiar
+              </button>
+            )}
+            <button onClick={handleSubir} disabled={procesando||!archivos.length} style={{
+              backgroundColor:procesando||!archivos.length?"#1a2a1a":"#1aff70",
+              color:"#070b10",border:"none",padding:"8px 24px",borderRadius:"4px",
+              fontSize:"11px",fontWeight:"700",cursor:procesando||!archivos.length?"not-allowed":"pointer",
+              fontFamily:"inherit",letterSpacing:"1px"}}>
+              {procesando?"PROCESANDO...":"IMPORTAR"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {resultado && (
+        <div style={{marginBottom:"20px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"10px",marginBottom:"16px"}}>
+            {[
+              {l:"Importados",        v:resultado.resumen.importados,        c:"#1aff70"},
+              {l:"Duplicados",        v:resultado.resumen.duplicados,        c:"#f59e0b"},
+              {l:"Huecos rellenados", v:resultado.resumen.huecos_rellenados, c:"#60a5fa"},
+              {l:"Errores",           v:resultado.resumen.errores,           c:"#ef4444"},
+            ].map((it,i)=>(
+              <div key={i} style={{...S.card(`${it.c}30`),position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:0,left:0,right:0,height:"2px",background:it.c}}/>
+                <div style={{fontSize:"9px",color:"#5a6a7e",letterSpacing:"2px",marginBottom:"4px"}}>{it.l.toUpperCase()}</div>
+                <div style={{fontSize:"28px",fontWeight:"700",color:it.c}}>{it.v}</div>
+              </div>
+            ))}
+          </div>
+
+          {resultado.importados.length > 0 && (
+            <div style={{...S.card(),padding:0,overflow:"hidden",marginBottom:"12px"}}>
+              <div style={{padding:"10px 16px",borderBottom:"1px solid #1d2430",fontSize:"10px",color:"#1aff70",letterSpacing:"2px"}}>
+                IMPORTADOS ({resultado.importados.length})
+              </div>
+              <table style={S.table}><thead><tr>
+                {["Período","kWh","Total","Confianza","Hueco"].map(h=><th key={h} style={S.th}>{h}</th>)}
+              </tr></thead><tbody>
+                {resultado.importados.map((r,i)=>(
+                  <tr key={i} style={{backgroundColor:i%2===0?"#0c1016":"transparent"}}>
+                    <td style={{...S.td,fontSize:"11px"}}>{r.periodo}</td>
+                    <td style={{...S.td,fontSize:"12px",color:"#1aff70",fontWeight:"700"}}>{r.kwh} kWh</td>
+                    <td style={{...S.td,fontSize:"12px",color:"#a78bfa"}}>${Number(r.total).toFixed(2)}</td>
+                    <td style={S.td}><span style={{fontSize:"9px",padding:"2px 7px",borderRadius:"3px",fontWeight:"700",
+                      backgroundColor:r.confianza>=85?"#0f2d1c":r.confianza>=60?"#2d2200":"#2d0f0f",
+                      color:r.confianza>=85?"#22c55e":r.confianza>=60?"#f59e0b":"#ef4444"}}>{r.confianza}%</span></td>
+                    <td style={{...S.td,fontSize:"10px",color:r.relleno_hueco?"#60a5fa":"#3d5070"}}>
+                      {r.relleno_hueco?"✓ rellenado":"—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody></table>
+            </div>
+          )}
+
+          {resultado.duplicados.length > 0 && (
+            <div style={{...S.card("#f59e0b20"),padding:0,overflow:"hidden",marginBottom:"12px"}}>
+              <div style={{padding:"10px 16px",borderBottom:"1px solid #f59e0b30",fontSize:"10px",color:"#f59e0b",letterSpacing:"2px"}}>
+                YA EXISTÍAN — no se modificaron ({resultado.duplicados.length})
+              </div>
+              <table style={S.table}><thead><tr>
+                {["Período","kWh","Total"].map(h=><th key={h} style={S.th}>{h}</th>)}
+              </tr></thead><tbody>
+                {resultado.duplicados.map((r,i)=>(
+                  <tr key={i} style={{backgroundColor:i%2===0?"#0c1016":"transparent"}}>
+                    <td style={{...S.td,fontSize:"11px",color:"#a07020"}}>{r.periodo}</td>
+                    <td style={{...S.td,fontSize:"12px",color:"#f59e0b"}}>{r.kwh} kWh</td>
+                    <td style={{...S.td,fontSize:"12px",color:"#5a6a7e"}}>${Number(r.total).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody></table>
+            </div>
+          )}
+
+          {resultado.errores.length > 0 && (
+            <div style={{...S.card("#ef444420"),padding:"12px 16px",marginBottom:"12px"}}>
+              <div style={{fontSize:"10px",color:"#ef4444",letterSpacing:"2px",marginBottom:"8px"}}>
+                ERRORES ({resultado.errores.length})
+              </div>
+              {resultado.errores.map((e,i)=>(
+                <div key={i} style={{fontSize:"11px",color:"#f87171",marginBottom:"4px"}}>{e.nombre}: {e.error}</div>
+              ))}
+            </div>
+          )}
+
+          <button onClick={()=>setResultado(null)} style={{backgroundColor:"#1aff70",color:"#070b10",
+            border:"none",padding:"8px 20px",borderRadius:"4px",fontSize:"11px",fontWeight:"700",
+            cursor:"pointer",fontFamily:"inherit",letterSpacing:"1px"}}>
+            ← Cargar más recibos
+          </button>
+        </div>
+      )}
+
+      <div style={{...S.card(),padding:0,overflow:"hidden"}}>
+        <div style={{padding:"12px 20px",borderBottom:"1px solid #1d2430",fontSize:"10px",
+          color:"#5a6a7e",letterSpacing:"2px",textTransform:"uppercase"}}>
+          Histórico — {recibos.length} Recibo{recibos.length!==1?"s":""}
+        </div>
+        {recibos.length === 0 ? (
+          <div style={{padding:"30px",textAlign:"center",fontSize:"11px",color:"#3d5070"}}>No hay recibos importados aún</div>
+        ) : (
+          <div style={{overflowX:"auto"}}>
+            <table style={S.table}><thead><tr>
+              {["Corte CFE","Período","Lec. Ant.","Lec. Act.","kWh","Total","$/kWh"].map(h=><th key={h} style={S.th}>{h}</th>)}
+            </tr></thead><tbody>
+              {recibos.map((c,i)=>(
+                <tr key={c.id||i} style={{backgroundColor:i===0?"#0d1f17":i%2===0?"#0c1016":"transparent"}}>
+                  <td style={{...S.td,fontSize:"11px",color:"#94a3b8"}}>{c.fin||c.fecha_lectura_cfe||""}</td>
+                  <td style={{...S.td,fontSize:"11px",color:"#5a6a7e"}}>{c.inicio||c.periodo_inicio||""} → {c.fin||c.periodo_fin||""}</td>
+                  <td style={{...S.td,fontSize:"11px",color:"#3d5070"}}>{(c.lectura_ini||c.lectura_anterior||0).toLocaleString()}</td>
+                  <td style={{...S.td,fontSize:"11px",color:"#5a6a7e"}}>{(c.lectura_fin||c.lectura_actual||0).toLocaleString()}</td>
+                  <td style={{...S.td,fontSize:"14px",fontWeight:"700",color:"#1aff70"}}>{c.kwh||((c.lectura_actual||0)-(c.lectura_anterior||0))}</td>
+                  <td style={{...S.td,fontSize:"13px",fontWeight:"600",color:"#a78bfa"}}>${Number(c.importe||c.total||0).toFixed(2)}</td>
+                  <td style={{...S.td,fontSize:"11px",color:"#f97316"}}>
+                    ${(Number(c.importe||c.total||0)/Math.max(1,c.kwh||((c.lectura_actual||0)-(c.lectura_anterior||0)))).toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody></table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const { usuario, logout }  = useAuth();
   const navigate             = useNavigate();
@@ -1046,30 +1263,13 @@ export default function Dashboard() {
 
         {/* ══════════ RECIBOS ══════════ */}
         {tab==="recibos" && (
-          <div>
-            <div style={{marginBottom:"20px"}}>
-              <div style={{fontSize:"10px",color:"#5a6a7e",letterSpacing:"2px",textTransform:"uppercase",marginBottom:"4px"}}>
-                Importar Recibos Históricos
-              </div>
-              <div style={{fontSize:"10px",color:"#3d5070"}}>
-                Sube PDFs o imágenes de recibos anteriores · Claude extrae y verifica todos los campos automáticamente
-              </div>
-            </div>
-            <div style={{display:"flex",gap:"0",marginBottom:"20px"}}>
-              {[{l:"1 · Subir archivo"},{l:"2 · Revisar y corregir"},{l:"3 · Guardar en histórico"}].map((st,i)=>(
-                <div key={i} style={{flex:1,textAlign:"center",padding:"8px",
-                  borderBottom:`2px solid ${i===0?ACCENT:"#1d2430"}`,
-                  fontSize:"9px",letterSpacing:"2px",color:i===0?ACCENT:"#3d5070"}}>
-                  {st.l}
-                </div>
-              ))}
-            </div>
-            <TabRecibos
-              ciclosHistoricos={recibos}
-              servicioId={servicio?.id}
-              onGuardado={() => { cargarDatos(); }}
-            />
-          </div>
+          <TabRecibosHistorial
+            recibos={recibos}
+            servicioId={servicio?.id}
+            onActualizado={() => {
+              if (servicio?.id) getRecibos(servicio.id).then(setRecibos).catch(() => {})
+            }}
+          />
         )}
 
         <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
