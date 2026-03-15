@@ -1,7 +1,7 @@
 import api from './client'
 
 export const getEventos = (servicioId) =>
-  api.get(`/eventos/${servicioId}`).then(r => r.data)
+  api.get('/lecturas', { params: { servicio_id: servicioId } }).then(r => r.data)
 
 export const registrarLectura = (datos) =>
-  api.post('/eventos/lectura', datos).then(r => r.data)
+  api.post('/lecturas', datos).then(r => r.data)
