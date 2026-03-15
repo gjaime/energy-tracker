@@ -155,7 +155,7 @@ async function insertarLecturaConInterpolacion(client, {
   const todosOrdenados = [
     ...existentes,
     ...estimados.map(e => ({ fecha: e.fecha, lectura_valor: e.lectura }))
-  ].sort((a, b) => a.fecha.localeCompare(b.fecha))
+  ].map(r => ({ ...r, fecha: normalizarFecha(r.fecha) })).sort((a, b) => a.fecha.localeCompare(b.fecha))
 
   const anterior    = todosOrdenados[todosOrdenados.length - 1]
   const consumoDia  = anterior ? lecturaInt - anterior.lectura_valor : 0
