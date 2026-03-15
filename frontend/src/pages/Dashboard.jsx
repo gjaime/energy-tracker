@@ -139,6 +139,9 @@ function reciboToCiclo(r, idx) {
     kwh,
     importe:     Number(r.total),
     dias,
+    p_bas: r.tarifa_precio_basico      ? Number(r.tarifa_precio_basico)      : null,
+    p_int: r.tarifa_precio_intermedio  ? Number(r.tarifa_precio_intermedio)  : null,
+    p_exc: r.tarifa_precio_excedente   ? Number(r.tarifa_precio_excedente)   : null,
   };
 }
 
@@ -877,8 +880,11 @@ export default function Dashboard() {
   const histData  = recibos.map(c => ({
     per:  String(c.fin).slice(5,10) || String(c.id),
     kwh:  c.kwh, imp: c.importe,
-    cKwh: +(c.importe/Math.max(1,c.kwh)).toFixed(2),
+    cKwh: +(c.importe/Math.max(1,c.kwh)).toFixed(4),
     dKwh: +(c.kwh/Math.max(1,c.dias)).toFixed(1),
+    pBas: c.p_bas  ? +Number(c.p_bas).toFixed(4)  : null,
+    pInt: c.p_int  ? +Number(c.p_int).toFixed(4)  : null,
+    pExc: c.p_exc  ? +Number(c.p_exc).toFixed(4)  : null,
   }));
 
   const navItems = [
@@ -1261,17 +1267,56 @@ export default function Dashboard() {
 
             {histData.length > 0 && (
               <div style={S.card()}>
-                <div style={{fontSize:"10px",color:"#5a6a7e",letterSpacing:"2px",marginBottom:"4px"}}>TENDENCIA $/kWh PROMEDIO</div>
-                <div style={{fontSize:"10px",color:"#3d5070",marginBottom:"14px"}}>Importe ÷ kWh · Refleja impacto del rango + ajuste tarifario bimestral.</div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <LineChart data={histData} margin={{top:0,right:0,bottom:0,left:-10}}>
+                <div style={{fontSize:"10px",color:"#5a6a7e",letterSpacing:"2px",marginBottom:"4px"}}>TENDENCIA DE PRECIOS POR RANGO TARIFARIO</div>
+                <div style={{fontSize:"10px",color:"#3d5070",marginBottom:"14px"}}>Precio real pagado por kWh en cada rango · histórico bimestral.</div>
+                <div style={{display:"flex",gap:"16px",marginBottom:"12px"}}>
+                  {[{col:"#22c55e",label:"Básico"},{col:"#f59e0b",label:"Intermedio"},{col:"#ef4444",label:"Excedente"},{col:"#f97316",label:"Prom. total"}].map((l,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:"5px"}}>
+                      <div style={{width:"20px",height:"2px",background:l.col,borderRadius:"2px"}}/>
+                      <span style={{fontSize:"9px",color:"#5a6a7e",letterSpacing:"1px"}}>{l.label.toUpperCase()}</span>
+                    </div>
+                  ))}
+                </div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={histData} margin={{top:4,right:8,bottom:0,left:-10}}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1d2430"/>
                     <XAxis dataKey="per" tick={{fill:"#3d5070",fontSize:9}}/>
-                    <YAxis tick={{fill:"#3d5070",fontSize:10}} domain={["auto","auto"]}/>
-                    <Tooltip contentStyle={ttStyle} formatter={v=>[`$${v}/kWh`,"Costo promedio"]}/>
-                    <Line type="monotone" dataKey="cKwh" stroke="#f97316" strokeWidth={2.5} dot={{fill:"#f97316",r:4}}/>
+                    <YAxis tick={{fill:"#3d5070",fontSize:10}} domain={["auto","auto"]} tickFormatter={v=>`$${v}`}/>
+                    <Tooltip contentStyle={ttStyle}
+                      formatter={(v,name)=>{
+                        const labels={pBas:"Básico",pInt:"Intermedio",pExc:"Excedente",cKwh:"Prom. total"}
+                        return [`$${Number(v).toFixed(4)}/kWh`, labels[name]||name]
+                      }}/>
+                    <Line type="monotone" dataKey="pBas" stroke="#22c55e" strokeWidth={2} dot={{fill:"#22c55e",r:3}}/>
+                    <Line type="monotone" dataKey="pInt" stroke="#f59e0b" strokeWidth={2} dot={{fill:"#f59e0b",r:3}}/>
+                    <Line type="monotone" dataKey="pExc" stroke="#ef4444" strokeWidth={2} dot={{fill:"#ef4444",r:3}}/>
+                    <Line type="monotone" dataKey="cKwh" stroke="#f97316" strokeWidth={2} strokeDasharray="5 3" dot={{fill:"#f97316",r:3}}/>
                   </LineChart>
                 </ResponsiveContainer>
+              </div>
+            )}
+            {histData.length > 0 && (
+              <div style={{...S.card(),padding:0,overflow:"hidden",marginTop:"16px"}}>
+                <div style={{padding:"12px 16px",borderBottom:"1px solid #1d2430",fontSize:"10px",color:"#5a6a7e",letterSpacing:"2px"}}>
+                  HISTORIAL TARIFARIO BIMESTRAL
+                </div>
+                <table style={S.table}><thead><tr>
+                  {["Período","kWh","P. Básico","P. Interm.","P. Excede.","$/kWh prom","Total"].map(h=>(
+                    <th key={h} style={S.th}>{h}</th>
+                  ))}
+                </tr></thead><tbody>
+                  {[...histData].reverse().map((r,i)=>(
+                    <tr key={i} style={{backgroundColor:i%2===0?"#0c1016":"transparent"}}>
+                      <td style={{...S.td,fontSize:"11px",color:"#94a3b8"}}>{r.per}</td>
+                      <td style={{...S.td,fontSize:"12px",color:"#1aff70",fontWeight:"700"}}>{r.kwh}</td>
+                      <td style={{...S.td,fontSize:"11px",color:"#22c55e"}}>${r.pBas?.toFixed(4)||"—"}</td>
+                      <td style={{...S.td,fontSize:"11px",color:"#f59e0b"}}>${r.pInt?.toFixed(4)||"—"}</td>
+                      <td style={{...S.td,fontSize:"11px",color:"#ef4444"}}>${r.pExc?.toFixed(4)||"—"}</td>
+                      <td style={{...S.td,fontSize:"11px",color:"#f97316",fontWeight:"700"}}>${r.cKwh?.toFixed(4)||"—"}</td>
+                      <td style={{...S.td,fontSize:"12px",color:"#a78bfa",fontWeight:"700"}}>${Number(r.imp||0).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody></table>
               </div>
             )}
           </div>
