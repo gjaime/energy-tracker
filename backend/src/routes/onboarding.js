@@ -441,44 +441,90 @@ router.post('/historial-xml', auth, upload.array('archivos', 30), async (req, re
     existentes.forEach(r => existenteMap[r.fecha_lectura_cfe] = r)
 
     // 4. Encadenar lecturas
-    // Buscar ancla: el XML más reciente que ya esté en DB nos da lectura_actual
+    // 4. Encadenar lecturas con anclas de confianza
+    // 4a. Buscar ancla confiable: recibo revisado que coincida con un XML del batch
     let anclaActual = null
     let anclaIdx    = -1
     for (let i = parsed.length - 1; i >= 0; i--) {
       const key = parsed[i].fecha_lectura_cfe
-      if (existenteMap[key]) { anclaActual = parseInt(existenteMap[key].lectura_actual); anclaIdx = i; break }
+      const existente = existenteMap[key]
+      if (existente && existente.extraccion_revisada) {
+        anclaActual = parseInt(existente.lectura_actual)
+        anclaIdx    = i
+        break
+      }
     }
-    // Si no hay ancla en DB, usar el recibo más reciente existente (aunque sea de otro período)
-    if (anclaActual === null && existentes.length) {
-      anclaActual = parseInt(existentes[existentes.length - 1].lectura_actual)
-      anclaIdx    = parsed.length  // ancla "después" del último XML
+    // 4b. Si no hay ancla revisada en el batch, buscar el revisado más reciente en DB
+    if (anclaActual === null) {
+      const revisados = existentes
+        .filter(r => r.extraccion_revisada)
+        .sort((a, b) => String(b.fecha_lectura_cfe).localeCompare(String(a.fecha_lectura_cfe)))
+      if (revisados.length) {
+        anclaActual = parseInt(revisados[0].lectura_actual)
+        anclaIdx    = -1
+      }
     }
-
-    if (anclaActual !== null) {
-      // Cadena hacia atrás (desde ancla hacia el pasado)
+    // 4c. Sin ancla confiable — pedir lectura_referencia
+    if (anclaActual === null) {
+      const lecturaRef = req.body.lectura_referencia ? parseInt(req.body.lectura_referencia) : null
+      if (!lecturaRef || isNaN(lecturaRef)) {
+        await client.query('ROLLBACK')
+        return res.status(422).json({
+          error: 'Se requiere una lectura de referencia',
+          detalle: 'No hay recibos verificados en la base de datos. Incluye el campo "lectura_referencia" con la lectura actual del medidor.',
+          requiere_lectura_referencia: true,
+        })
+      }
+      anclaActual = lecturaRef
+      anclaIdx    = parsed.length - 1
+      parsed[anclaIdx].lectura_actual   = lecturaRef
+      parsed[anclaIdx].lectura_anterior = lecturaRef - parsed[anclaIdx].consumo_kwh
+    }
+    // 4d. Propagar cadena desde la ancla
+    if (anclaIdx <= 0) {
+      // Ancla es el más reciente o externa — propagar hacia atrás
       let lecActual = anclaActual
-      for (let i = (anclaIdx === parsed.length ? parsed.length - 1 : anclaIdx - 1); i >= 0; i--) {
+      const inicio = anclaIdx === -1 ? parsed.length - 1 : anclaIdx
+      for (let i = inicio; i >= 0; i--) {
+        if (parsed[i].lectura_actual == null) {
+          parsed[i].lectura_actual   = lecActual
+          parsed[i].lectura_anterior = lecActual - parsed[i].consumo_kwh
+        }
+        lecActual = parsed[i].lectura_anterior
+      }
+    } else {
+      // Ancla en medio — propagar en ambas direcciones
+      let lecActual = anclaActual
+      for (let i = anclaIdx - 1; i >= 0; i--) {
         parsed[i].lectura_actual   = lecActual
         parsed[i].lectura_anterior = lecActual - parsed[i].consumo_kwh
         lecActual = parsed[i].lectura_anterior
       }
-      // Cadena hacia adelante (si hay XMLs más nuevos que el ancla)
-      if (anclaIdx < parsed.length) {
-        let lecPrev = anclaActual
-        for (let i = anclaIdx + 1; i < parsed.length; i++) {
-          parsed[i].lectura_anterior = lecPrev
-          parsed[i].lectura_actual   = lecPrev + parsed[i].consumo_kwh
-          lecPrev = parsed[i].lectura_actual
-        }
+      let lecPrev = anclaActual
+      for (let i = anclaIdx + 1; i < parsed.length; i++) {
+        parsed[i].lectura_anterior = lecPrev
+        parsed[i].lectura_actual   = lecPrev + parsed[i].consumo_kwh
+        lecPrev = parsed[i].lectura_actual
       }
-    } else {
-      // Sin ancla: encadenar desde 0 (degradado, pero funcional)
-      let running = 0
-      for (const p of parsed) {
-        p.lectura_anterior = running
-        p.lectura_actual   = running + p.consumo_kwh
-        running = p.lectura_actual
+    }
+    // 4e. Validar consistencia de cadena
+    const erroresConsistencia = []
+    for (let i = 0; i < parsed.length - 1; i++) {
+      const actual    = parsed[i].lectura_actual
+      const siguiente = parsed[i + 1].lectura_anterior
+      if (actual != null && siguiente != null && actual !== siguiente) {
+        erroresConsistencia.push(
+          `Inconsistencia entre ${parsed[i].fecha_lectura_cfe} (act: ${actual}) y ${parsed[i+1].fecha_lectura_cfe} (ant: ${siguiente})`
+        )
       }
+    }
+    if (erroresConsistencia.length) {
+      await client.query('ROLLBACK')
+      return res.status(422).json({
+        error: 'La cadena de lecturas no es consistente',
+        detalle: erroresConsistencia,
+        requiere_lectura_referencia: true,
+      })
     }
 
     // 5. Insertar cada recibo y crear ciclos históricos directamente
@@ -491,68 +537,121 @@ router.post('/historial-xml', auth, upload.array('archivos', 30), async (req, re
 
     for (let idx = 0; idx < parsed.length; idx++) {
       const datos = parsed[idx]
-      if (existenteMap[datos.fecha_lectura_cfe]) { resultado.duplicados++; continue }
       if (datos.lectura_anterior == null || datos.lectura_actual == null) {
         resultado.errores.push({ archivo: datos._nombre, error: 'No se pudo determinar lecturas' }); continue
       }
       try {
-        // Insertar recibo
-        const { rows: reciboRows } = await client.query(
-          `INSERT INTO recibos (
-            servicio_id, fecha_emision, fecha_lectura_cfe, periodo_inicio, periodo_fin,
-            lectura_anterior, lectura_actual,
-            tarifa_precio_basico, tarifa_precio_intermedio, tarifa_precio_excedente,
-            tarifa_limite_basico, tarifa_limite_intermedio,
-            cargo_suministro, cargo_distribucion, cargo_transmision,
-            cargo_cenace, cargo_energia, cargo_capacidad, cargo_scnmen,
-            apoyo_gubernamental, dap, subtotal, impuestos, total,
-            extraccion_confianza
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,100)
-          RETURNING *`,
-          [
-            servicio_id, datos.fecha_emision, datos.fecha_lectura_cfe,
-            datos.periodo_inicio, datos.periodo_fin,
-            datos.lectura_anterior, datos.lectura_actual,
-            datos.tarifa_precio_basico,     datos.tarifa_precio_intermedio,  datos.tarifa_precio_excedente,
-            datos.tarifa_limite_basico,     datos.tarifa_limite_intermedio,
-            datos.cargo_suministro || null, datos.cargo_distribucion || null, datos.cargo_transmision || null,
-            datos.cargo_cenace    || null,  datos.cargo_energia      || null, datos.cargo_capacidad   || null,
-            datos.cargo_scnmen    || null,  datos.apoyo_gubernamental,
-            datos.dap, datos.subtotal, datos.impuestos, datos.total,
-          ]
-        )
-        const recibo = reciboRows[0]
-
-        // Verificar si ya existe un ciclo que cubra este período
-        const { rows: cicloExist } = await client.query(
-          `SELECT id FROM ciclos
-           WHERE servicio_id=$1
-             AND fecha_inicio <= $2::date
-             AND (fecha_fin >= $2::date OR fecha_fin IS NULL)
-           LIMIT 1`,
-          [servicio_id, datos.fecha_lectura_cfe]
-        )
-
-        if (cicloExist.length === 0) {
-          // Crear ciclo cerrado histórico directamente
-          const fechaInicio = datos.periodo_inicio || datos.fecha_lectura_cfe
-          await client.query(
-            `INSERT INTO ciclos
-               (servicio_id, fecha_inicio, fecha_fin, lectura_inicial, lectura_final,
-                estado, recibo_id, fuente_cierre)
-             VALUES ($1,$2,$3,$4,$5,'cerrado',$6,'recibo_importado')`,
-            [servicio_id, fechaInicio, datos.fecha_lectura_cfe,
-             datos.lectura_anterior, datos.lectura_actual, recibo.id]
+        let recibo
+        if (existenteMap[datos.fecha_lectura_cfe]) {
+          // XML es fuente de verdad — sobreescribir recibo existente completo
+          const { rows: updRows } = await client.query(
+            `UPDATE recibos SET
+              fecha_emision              = $1,
+              periodo_inicio             = $2,
+              periodo_fin                = $3,
+              lectura_anterior           = $4,
+              lectura_actual             = $5,
+              tarifa_precio_basico       = $6,
+              tarifa_precio_intermedio   = $7,
+              tarifa_precio_excedente    = $8,
+              tarifa_limite_basico       = $9,
+              tarifa_limite_intermedio   = $10,
+              cargo_suministro           = $11,
+              cargo_distribucion         = $12,
+              cargo_transmision          = $13,
+              cargo_cenace               = $14,
+              cargo_energia              = $15,
+              cargo_capacidad            = $16,
+              cargo_scnmen               = $17,
+              apoyo_gubernamental        = $18,
+              dap                        = $19,
+              subtotal                   = $20,
+              impuestos                  = $21,
+              total                      = $22,
+              extraccion_confianza       = 100,
+              extraccion_revisada        = true
+            WHERE servicio_id=$23 AND fecha_lectura_cfe=$24
+            RETURNING *`,
+            [
+              datos.fecha_emision, datos.periodo_inicio, datos.periodo_fin,
+              datos.lectura_anterior, datos.lectura_actual,
+              datos.tarifa_precio_basico,     datos.tarifa_precio_intermedio,  datos.tarifa_precio_excedente,
+              datos.tarifa_limite_basico,     datos.tarifa_limite_intermedio,
+              datos.cargo_suministro || null, datos.cargo_distribucion || null, datos.cargo_transmision || null,
+              datos.cargo_cenace    || null,  datos.cargo_energia      || null, datos.cargo_capacidad   || null,
+              datos.cargo_scnmen    || null,  datos.apoyo_gubernamental,
+              datos.dap, datos.subtotal, datos.impuestos, datos.total,
+              servicio_id, datos.fecha_lectura_cfe,
+            ]
           )
-        } else if (cicloExist[0].id !== cicloActivoId) {
-          // Actualizar ciclo existente cerrado con el recibo_id
+          recibo = updRows[0]
+          // Actualizar también el ciclo asociado con lecturas correctas
           await client.query(
-            `UPDATE ciclos SET recibo_id=$1 WHERE id=$2`,
-            [recibo.id, cicloExist[0].id]
+            `UPDATE ciclos SET
+               lectura_inicial = $1,
+               lectura_final   = $2
+             WHERE recibo_id = $3`,
+            [datos.lectura_anterior, datos.lectura_actual, recibo.id]
           )
-        }
+          resultado.actualizados = (resultado.actualizados || 0) + 1
+        } else {
+          // Recibo nuevo — INSERT normal
+          const { rows: reciboRows } = await client.query(
+            `INSERT INTO recibos (
+              servicio_id, fecha_emision, fecha_lectura_cfe, periodo_inicio, periodo_fin,
+              lectura_anterior, lectura_actual,
+              tarifa_precio_basico, tarifa_precio_intermedio, tarifa_precio_excedente,
+              tarifa_limite_basico, tarifa_limite_intermedio,
+              cargo_suministro, cargo_distribucion, cargo_transmision,
+              cargo_cenace, cargo_energia, cargo_capacidad, cargo_scnmen,
+              apoyo_gubernamental, dap, subtotal, impuestos, total,
+              extraccion_confianza
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,100)
+            RETURNING *`,
+            [
+              servicio_id, datos.fecha_emision, datos.fecha_lectura_cfe,
+              datos.periodo_inicio, datos.periodo_fin,
+              datos.lectura_anterior, datos.lectura_actual,
+              datos.tarifa_precio_basico,     datos.tarifa_precio_intermedio,  datos.tarifa_precio_excedente,
+              datos.tarifa_limite_basico,     datos.tarifa_limite_intermedio,
+              datos.cargo_suministro || null, datos.cargo_distribucion || null, datos.cargo_transmision || null,
+              datos.cargo_cenace    || null,  datos.cargo_energia      || null, datos.cargo_capacidad   || null,
+              datos.cargo_scnmen    || null,  datos.apoyo_gubernamental,
+              datos.dap, datos.subtotal, datos.impuestos, datos.total,
+            ]
+          )
+          recibo = reciboRows[0]
 
-        resultado.importados++
+          // Verificar si ya existe un ciclo que cubra este período
+          const { rows: cicloExist } = await client.query(
+            `SELECT id FROM ciclos
+             WHERE servicio_id=$1
+               AND fecha_inicio <= $2::date
+               AND (fecha_fin >= $2::date OR fecha_fin IS NULL)
+             LIMIT 1`,
+            [servicio_id, datos.fecha_lectura_cfe]
+          )
+
+          if (cicloExist.length === 0) {
+            // Crear ciclo cerrado histórico directamente
+            const fechaInicio = datos.periodo_inicio || datos.fecha_lectura_cfe
+            await client.query(
+              `INSERT INTO ciclos
+                 (servicio_id, fecha_inicio, fecha_fin, lectura_inicial, lectura_final,
+                  estado, recibo_id, fuente_cierre)
+               VALUES ($1,$2,$3,$4,$5,'cerrado',$6,'recibo_importado')`,
+              [servicio_id, fechaInicio, datos.fecha_lectura_cfe,
+               datos.lectura_anterior, datos.lectura_actual, recibo.id]
+            )
+          } else if (cicloExist[0].id !== cicloActivoId) {
+            // Actualizar ciclo existente cerrado con el recibo_id
+            await client.query(
+              `UPDATE ciclos SET recibo_id=$1 WHERE id=$2`,
+              [recibo.id, cicloExist[0].id]
+            )
+          }
+          resultado.importados++
+        } // fin else INSERT
       } catch (e) {
         resultado.errores.push({ archivo: datos._nombre, error: e.message })
       }

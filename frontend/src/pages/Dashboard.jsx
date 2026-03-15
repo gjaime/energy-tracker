@@ -501,7 +501,7 @@ function TabRecibosHistorial({ recibos, servicioId, onActualizado }) {
         timeout: 300000,
       })
       const importados = data.importados || 0
-      const resumenNorm = data.resumen || { importados, duplicados: data.duplicados||0, huecos_rellenados: data.huecos_rellenados||0, errores: Array.isArray(data.errores)?data.errores.length:0 }
+      const resumenNorm = data.resumen || { importados, actualizados: data.actualizados||0, duplicados: data.duplicados||0, huecos_rellenados: data.huecos_rellenados||0, errores: Array.isArray(data.errores)?data.errores.length:0 }
       setResultado({ resumen: resumenNorm, importados: [], duplicados: [], errores: Array.isArray(data.errores)?data.errores:[] })
       setArchivos([])
       if (resumenNorm.importados > 0 && onActualizado) onActualizado()
@@ -597,10 +597,11 @@ function TabRecibosHistorial({ recibos, servicioId, onActualizado }) {
         <div style={{marginBottom:"20px"}}>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"10px",marginBottom:"16px"}}>
             {[
-              {l:"Importados",        v:resultado.resumen.importados,        c:"#1aff70"},
-              {l:"Duplicados",        v:resultado.resumen.duplicados,        c:"#f59e0b"},
-              {l:"Huecos rellenados", v:resultado.resumen.huecos_rellenados, c:"#60a5fa"},
-              {l:"Errores",           v:resultado.resumen.errores,           c:"#ef4444"},
+              {l:"Importados",        v:resultado.resumen.importados,                      c:"#1aff70"},
+              {l:resultado.resumen.actualizados>0?"Actualizados":"Duplicados",
+               v:resultado.resumen.actualizados||resultado.resumen.duplicados||0,          c:"#f59e0b"},
+              {l:"Huecos rellenados", v:resultado.resumen.huecos_rellenados,               c:"#60a5fa"},
+              {l:"Errores",           v:resultado.resumen.errores,                         c:"#ef4444"},
             ].map((it,i)=>(
               <div key={i} style={{...S.card(`${it.c}30`),position:"relative",overflow:"hidden"}}>
                 <div style={{position:"absolute",top:0,left:0,right:0,height:"2px",background:it.c}}/>
