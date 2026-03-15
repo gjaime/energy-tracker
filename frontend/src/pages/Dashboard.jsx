@@ -120,7 +120,7 @@ function eventoToReg(e) {
     fecha:    e.fecha,
     lectura:  e.lectura_valor,
     tipo:     tipoMap[e.tipo] || "diaria",
-    estimada: e.sobreescrita || false,
+    estimada: e.sobreescrita || e.fuente === 'sistema',
     nota:     e.notas || "",
   };
 }
@@ -498,14 +498,35 @@ export default function Dashboard() {
       setServicio(svc);
       setCicloInfo({ inicio: svc.fecha_alta?.split("T")[0] || new Date().toISOString().split("T")[0], dias_est: 60 });
 
-      const [evRes, recRes] = await Promise.all([
+      const [evRes, recRes, ciclosRes] = await Promise.all([
         api.get("/lecturas", { params: { servicio_id: svc.id } }),
         api.get("/recibos",  { params: { servicio_id: svc.id } }),
+        api.get("/ciclos",   { params: { servicio_id: svc.id } }),
       ]);
 
       // Mapear eventos a registros internos
       const mapped = evRes.data.map(eventoToReg)
         .sort((a,b) => a.fecha.localeCompare(b.fecha));
+
+      // Inyectar registro de apertura desde el ciclo activo
+      // para que el motor de interpolación tenga punto de partida
+      const cicloActivo = ciclosRes.data.find(c => c.estado === "abierto");
+      if (cicloActivo && cicloActivo.lectura_inicial) {
+        const fechaApertura = cicloActivo.fecha_inicio;
+        const yaExiste = mapped.some(r => r.fecha === fechaApertura && r.lectura === cicloActivo.lectura_inicial);
+        if (!yaExiste) {
+          mapped.unshift({
+            id:       "apertura-" + cicloActivo.id,
+            fecha:    fechaApertura,
+            lectura:  cicloActivo.lectura_inicial,
+            tipo:     "cierre_ciclo",
+            estimada: false,
+            nota:     "Lectura CFE — apertura de ciclo",
+          });
+        }
+        setCicloInfo({ inicio: fechaApertura, dias_est: 60 });
+      }
+
       setRegs(mapped);
 
       // Mapear recibos a ciclos históricos
