@@ -239,6 +239,7 @@ Para usar datos reales en producción, reemplazar `03_seed_demo.sql` con `03_see
 
 | Feature | Descripción |
 |---|---|
+| ✏️ **Corrección de lecturas** | Eliminar la última lectura registrada manualmente para volver a introducirla. Solo aplica a lecturas de fuente `usuario` o `telegram` — nunca a lecturas oficiales CFE. Al eliminar, limpia los estimados interpolados que dependían de esa lectura; el gap se recalcula automáticamente cuando el usuario registre el valor correcto. Endpoint: `DELETE /api/lecturas/ultima?servicio_id=` |
 | 🌐 **Cloudflare Named Tunnel** | URL pública estable con HTTPS para acceso fuera de la red local, sin abrir puertos |
 | 🔐 **Google SSO** | Login con cuenta Google como alternativa a email/password. Requiere URL pública HTTPS |
 | 📱 **PWA + Responsive** | Manifest para instalar como app en celular, layout adaptado a pantallas pequeñas |
