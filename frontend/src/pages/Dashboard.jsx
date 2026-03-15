@@ -826,7 +826,7 @@ export default function Dashboard() {
       if (ultimo?.tarifa_precio_basico) {
         setTarifa({
           bas_lim: ultimo.tarifa_limite_basico     || 150,
-          int_lim: ultimo.tarifa_limite_intermedio || 280,
+          int_lim: (ultimo.tarifa_limite_basico || 150) + (ultimo.tarifa_limite_intermedio || 130),
           p_bas:   Number(ultimo.tarifa_precio_basico),
           p_int:   Number(ultimo.tarifa_precio_intermedio),
           p_exc:   Number(ultimo.tarifa_precio_excedente),
