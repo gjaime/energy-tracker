@@ -1,47 +1,7 @@
 # ⚡ Energy Tracker
 
-Webapp personal para monitoreo de consumo eléctrico bimestral en México (CFE).  
-Registro de lecturas del medidor, importación de recibos PDF con extracción automática via IA, y dashboard de historial de consumo y costos.
-
----
-
-## 📋 Características
-
-- **Registro de usuarios** con username corto (≤10 caracteres) y PIN de 4 dígitos
-- **Wizard de onboarding** guiado para configurar el perfil desde los recibos existentes
-- **Extracción automática de recibos** PDF e imagen via Claude AI (Anthropic)
-- **Carga de historial en batch** — sube varios recibos a la vez, el sistema los ordena automáticamente
-- **Registro de lecturas diarias** desde la webapp
-- **Dashboard** con gráfica de consumo diario, tarjetas de resumen e historial de recibos
-- **Alertas** cuando el ciclo lleva más de 60 días sin recibo nuevo
-- **Aviso de funcionalidades limitadas** cuando hay menos de 2 recibos (proyecciones no disponibles)
-- **Panel de administración** para cambio de PIN y estado del sistema
-
----
-
-## 🏗 Arquitectura
-
-```
-Navegador
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│         LXC CT 222 · 10.13.69.90        │
-│         pve02 · Debian 12               │
-│                                         │
-│  nginx (:80)                            │
-│    ├── /      → frontend (:3000)        │
-│    └── /api/  → backend  (:3847)        │
-│                                         │
-│  backend (Node.js/Express)              │
-│    └── PostgreSQL (:5432)               │
-│                                         │
-│  frontend (React/Vite)                  │
-└─────────────────────────────────────────┘
-                    │
-              ☁️ Anthropic API
-         (extracción de recibos PDF)
-```
+Webapp para monitoreo de consumo eléctrico bimestral en México (CFE).  
+Registro diario de lecturas del medidor, importación de recibos vía PDF o XML/CFDI con extracción automática, y bot de Telegram para registro desde el celular.
 
 ---
 
@@ -49,135 +9,116 @@ Navegador
 
 ```
 energy-tracker/
-├── backend/
-│   ├── Dockerfile
-│   ├── package.json
-│   └── src/
-│       ├── index.js                  → Entry point, registro de rutas
-│       ├── db/pool.js                → Pool de conexiones PostgreSQL
-│       ├── middleware/auth.js        → JWT middleware
-│       ├── services/cicloService.js  → Lógica de ciclos bimestrales
-│       └── routes/
-│           ├── auth.js               → POST /login, POST /register
-│           ├── onboarding.js         → Wizard de configuración inicial
-│           ├── lecturas.js           → GET/POST lecturas del medidor
-│           ├── servicios.js          → GET servicios del usuario
-│           ├── ciclos.js             → GET historial de ciclos
-│           ├── recibos.js            → GET recibos importados
-│           ├── stats.js              → GET resumen del ciclo activo
-│           └── admin.js              → Panel de administración
-├── frontend/
-│   ├── Dockerfile
-│   ├── vite.config.js
-│   ├── index.html
-│   └── src/
-│       ├── main.jsx                  → Rutas React Router
-│       ├── api/                      → Capa HTTP (axios)
-│       │   ├── client.js             → Axios base + interceptores JWT
-│       │   ├── auth.js
-│       │   ├── onboarding.js
-│       │   ├── servicios.js
-│       │   ├── eventos.js
-│       │   ├── recibos.js
-│       │   └── admin.js
-│       ├── context/AuthContext.jsx   → Sesión global (login/logout/onboarding)
-│       ├── components/
-│       │   ├── layout/ProtectedRoute.jsx
-│       │   └── ui/AlertaCiclo.jsx
-│       └── pages/
-│           ├── Login.jsx             → Login + registro en una pantalla
-│           ├── Onboarding.jsx        → Wizard 4 pasos
-│           ├── Dashboard.jsx         → Vista principal (3 tabs)
-│           └── Admin.jsx             → Panel de configuración
-├── database/
-│   └── init/
-│       ├── 01_schema.sql             → Tablas, índices, triggers
-│       └── 02_views.sql              → Vistas para consultas frecuentes
-├── nginx/
-│   └── nginx.conf
+├── backend/          → API REST (Node.js + Express)
+├── frontend/         → Interfaz web (React + Vite)
+├── database/         → Scripts SQL de inicialización
+├── n8n/              → Workflow de Telegram importable
+├── nginx/            → Reverse proxy
 ├── docker-compose.yml
 ├── .env.example
-└── setup-lxc-proxmox.sh             → Script de instalación en Proxmox
+└── README.md
+```
+
+---
+
+## 🏗 Arquitectura
+
+```
+Tu celular
+    │
+    ▼
+ Telegram ──webhook──► n8n (:5678)
+                         │
+                         │ http://backend:3847  (red interna Docker)
+                         ▼
+┌─────────────────────────────────────────┐
+│         LXC / VM / VPS                  │
+│                                         │
+│  nginx (:80)                            │
+│    ├── / ──────► frontend (:3000)       │
+│    └── /api ───► backend (:3847)        │
+│                     │                  │
+│              PostgreSQL (:5432)         │
+│                                         │
+│  n8n (:5678) ──► backend (:3847)        │
+└─────────────────────────────────────────┘
+                    │
+              ☁️ Anthropic API
+          (extracción de recibos PDF)
 ```
 
 ---
 
 ## 🚀 Instalación
 
-### Requisitos
-
-- Proxmox VE (probado en pve02)
-- Acceso root al nodo
-- Conexión a internet desde el nodo
-- API Key de Anthropic
-
-### 1. Correr el script de setup en pve02
+### 1. Clonar el repositorio
 
 ```bash
-# Copiar el script al nodo
-scp setup-lxc-proxmox.sh root@10.13.69.8:/root/
-
-# En pve02
-chmod +x /root/setup-lxc-proxmox.sh
-./setup-lxc-proxmox.sh
+git clone https://github.com/gjaime/energy-tracker.git
+cd energy-tracker
 ```
-
-El script crea el LXC CT 222 con:
-
-| Parámetro | Valor |
-|---|---|
-| Nodo | pve02 |
-| CT ID | 222 |
-| IP | 10.13.69.90/24 |
-| RAM | 1.5 GB |
-| Disco | 20 GB |
-| Cores | 1 |
-| SO | Debian 12 |
 
 ### 2. Configurar variables de entorno
 
 ```bash
-pct exec 222 -- nano /opt/energy-tracker/.env
+cp .env.example .env
+nano .env
 ```
+
+Ver `.env.example` para la lista completa. Variables mínimas requeridas:
 
 | Variable | Descripción |
 |---|---|
-| `DB_PASSWORD` | Contraseña para PostgreSQL |
-| `SECRET_KEY` | Clave JWT — generada automáticamente por el script |
-| `ANTHROPIC_API_KEY` | API key de Anthropic (sk-ant-...) |
+| `DB_PASSWORD` | Contraseña de PostgreSQL |
+| `SECRET_KEY` | Clave JWT — `openssl rand -hex 32` |
+| `ANTHROPIC_API_KEY` | API key de Anthropic |
+| `N8N_UI_PASSWORD` | Contraseña de acceso a n8n |
+| `N8N_ENCRYPTION_KEY` | Clave de encriptación n8n — `openssl rand -hex 32` |
+| `N8N_API_KEY` | API key para autenticar n8n → backend — `openssl rand -hex 32` |
 
-### 3. Reiniciar servicios tras editar el .env
+### 3. Levantar los servicios
 
 ```bash
-pct exec 222 -- bash -c 'cd /opt/energy-tracker && docker compose restart'
+docker compose up -d
+docker compose ps
 ```
 
-### 4. Acceder
+### 4. Obtener UUIDs para el .env
+
+Después del primer deploy, obtener los UUIDs reales:
+
+```bash
+# UUID del usuario admin (para N8N_SERVICE_USER_ID)
+docker compose exec database psql -U energy_user -d energy_tracker \
+  -c "SELECT id, email FROM usuarios;"
+
+# UUID del servicio CFE (para ENERGY_SERVICIO_ID)
+docker compose exec database psql -U energy_user -d energy_tracker \
+  -c "SELECT id, alias, numero_servicio FROM servicios;"
+```
+
+Actualizar `.env` con esos valores y reiniciar:
+```bash
+docker compose restart backend n8n
+```
+
+### 5. Configurar el bot de Telegram en n8n
+
+```
+1. Abre http://<tu-ip>:5678
+2. Workflows → Import from file → n8n/energy-workflow.json
+3. Credentials → Telegram API → pegar token de @BotFather
+4. Credentials → Header Auth → pegar N8N_API_KEY
+5. Activar el workflow
+```
+
+### 6. Acceder
 
 | Servicio | URL |
 |---|---|
-| Webapp | http://10.13.69.90 |
-| Health check | http://10.13.69.90/health |
-
----
-
-## 🖥 Uso
-
-### Primer uso — Registro y onboarding
-
-1. Entra a `http://10.13.69.90`
-2. Selecciona **Crear cuenta**, elige un username (≤10 caracteres alfanuméricos) y un PIN de 4 dígitos
-3. El wizard de onboarding te guía en 4 pasos:
-   - **Paso 1** — Sube tu recibo CFE más reciente (PDF o imagen). Claude extrae los datos automáticamente
-   - **Paso 2** — Confirma que es el recibo más reciente e ingresa la lectura actual de tu medidor. Con esto se calcula el consumo acumulado desde el último corte
-   - **Paso 3** — Opcionalmente, sube recibos históricos en batch (el sistema los ordena por fecha automáticamente)
-   - **Paso 4** — Resumen del perfil creado
-
-### Uso diario
-
-- **Tab Lecturas** → registra la lectura del medidor cada que quieras
-- **Tab Recibos** → consulta el historial de recibos importados
-- **Tab Dashboard** → gráfica de consumo diario y tarjetas de resumen
+| Webapp | `http://<tu-ip>` |
+| n8n | `http://<tu-ip>:5678` |
+| API health | `http://<tu-ip>/health` |
 
 ---
 
@@ -188,97 +129,80 @@ pct exec 222 -- bash -c 'cd /opt/energy-tracker && docker compose restart'
 | Frontend | React 18 + Vite + Recharts |
 | Backend | Node.js 20 + Express |
 | Base de datos | PostgreSQL 16 |
-| Extracción PDF | Claude API — claude-sonnet-4 (Anthropic) |
+| Telegram bridge | n8n (self-hosted) |
+| Extracción PDF | Claude API (Anthropic) |
 | Proxy | Nginx Alpine |
 | Contenedores | Docker Compose |
-| Infraestructura | Proxmox VE · LXC Debian 12 |
 
 ---
 
-## 🗄 Base de datos
+## 🤖 Comandos de Telegram
 
-### Tablas principales
-
-| Tabla | Descripción |
+| Comando | Ejemplo |
 |---|---|
-| `usuarios` | Usuarios del sistema (username + PIN hash) |
-| `servicios` | Contratos CFE por usuario |
-| `ciclos` | Bimestres de consumo (abiertos o cerrados) |
-| `eventos` | Lecturas diarias del medidor |
-| `recibos` | Datos extraídos de los PDFs importados |
-| `tarifas_historicas` | Precios por bimestre para proyecciones futuras |
+| `/lectura <val> [nota]` | `/lectura 17580` |
+| `/lectura <val> <fecha> [nota]` | `/lectura 17580 2026-03-01 Lavado` |
+| `/cierre <val> [nota]` | `/cierre 17610` |
+| `/evento <val> [nota]` | `/evento 17580 Revisión` |
+| `/confirmar <id>` | `/confirmar abc12345` |
+| `/cancelar <id>` | `/cancelar abc12345` |
+| `/estado` | resumen del ciclo actual |
+| `/ayuda` | lista de comandos |
 
-### Vistas
+---
 
-| Vista | Descripción |
-|---|---|
-| `v_ciclo_activo` | Ciclo abierto con consumo acumulado y alerta por días |
-| `v_consumo_diario` | Consumo diario por diferencia entre lecturas |
-| `v_historico_ciclos` | Ciclos cerrados con costo total del recibo |
+## 📋 Importación de recibos históricos
+
+El sistema soporta dos métodos para cargar el historial de recibos CFE:
+
+### XML / CFDI (recomendado)
+Los archivos XML descargados desde el portal de CFE contienen todos los datos estructurados y son la fuente de verdad. El parser es 100% determinista — no requiere IA ni puede cometer errores de OCR. Los XMLs también pueden **corregir y sobreescribir** datos de recibos previamente cargados por PDF.
+
+### PDF / Imagen
+Los PDFs son procesados por Claude AI para extracción automática de datos. Útil cuando no se tienen los XMLs disponibles. La confianza de extracción se muestra en la interfaz.
+
+---
+
+## 🔐 Primer acceso
+
+Al iniciar por primera vez, el sistema te guiará por un proceso de onboarding de 4 pasos:
+
+1. **Recibo más reciente** — sube tu último recibo CFE (PDF) para extraer los datos del ciclo actual
+2. **Lectura de hoy** — ingresa la lectura actual de tu medidor físico
+3. **Historial** — carga recibos anteriores para habilitar tendencias (opcional, recomendado XML)
+4. **Listo** — accede al dashboard completo
+
+> ⚠️ Cambia la contraseña por defecto en la sección **Configuración → Cuenta** después del primer acceso.
 
 ---
 
 ## ⚙️ Comandos útiles
 
 ```bash
-# Entrar al contenedor
-pct enter 222
-
-# Ver estado de los servicios
-pct exec 222 -- docker compose -f /opt/energy-tracker/docker-compose.yml ps
+# Ver todos los servicios
+docker compose ps
 
 # Ver logs en tiempo real
-pct exec 222 -- docker compose -f /opt/energy-tracker/docker-compose.yml logs -f
-pct exec 222 -- docker compose -f /opt/energy-tracker/docker-compose.yml logs -f backend
+docker compose logs -f
+docker compose logs -f backend
 
 # Reiniciar un servicio
-pct exec 222 -- docker compose -f /opt/energy-tracker/docker-compose.yml restart backend
+docker compose restart backend
+
+# Resetear la base de datos (⚠️ borra todo)
+docker compose down -v && docker compose up -d
 
 # Entrar a psql
-pct exec 222 -- docker compose -f /opt/energy-tracker/docker-compose.yml exec database \
-    psql -U energy_user -d energy_tracker
-
-# Asignar rol admin a un usuario
-pct exec 222 -- docker compose -f /opt/energy-tracker/docker-compose.yml exec database \
-    psql -U energy_user -d energy_tracker \
-    -c "UPDATE usuarios SET rol='admin' WHERE nombre_usuario='tu_usuario';"
-
-# Reset completo de la base de datos (⚠️ borra todo)
-pct exec 222 -- bash -c 'cd /opt/energy-tracker && docker compose down -v && docker compose up -d'
+docker compose exec database psql -U energy_user -d energy_tracker
 ```
 
-### Actualizar desde el repo
+---
+
+## 📁 Variables de entorno
+
+Ver `.env.example` para la referencia completa. Nunca subas tu `.env` al repositorio.
 
 ```bash
-# En tu laptop
-git add -A && git commit -m "..." && git push
-
-# En el LXC
-pct exec 222 -- bash -c '
-    cd /opt/energy-tracker &&
-    git reset --hard origin/main &&
-    git pull &&
-    docker compose build &&
-    docker compose up -d
-'
+# Generar claves seguras
+openssl rand -hex 32   # para SECRET_KEY, N8N_ENCRYPTION_KEY, N8N_API_KEY
 ```
-
----
-
-## 🔐 Seguridad
-
-- PINs almacenados con bcrypt (10 rounds)
-- Autenticación JWT con expiración de 7 días
-- Comunicación interna Docker en red privada (backend no expuesto directamente)
-- Firewall ufw: solo puertos 22, 80 y 443 habilitados
-
----
-
-## 🗺 Roadmap
-
-- [ ] Integración Telegram (fase 2) — registro de lecturas via bot
-- [ ] Proyecciones de consumo y costo estimado para el cierre del ciclo
-- [ ] Gráfica de tendencia histórica bimestral
-- [ ] Soporte multi-servicio (varios medidores por usuario)
-- [ ] Importación de recibos desde el dashboard (fuera del onboarding)
-- [ ] Tunnel HTTPS permanente (Cloudflare)
