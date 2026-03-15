@@ -1252,18 +1252,7 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"12px",marginTop:"14px"}}>
-                {[
-                  {l:"IVA",   v:"16%",              c:"#60a5fa"},
-                  {l:"DAP",   v:`$${tarifa.dap}`,   c:"#f97316"},
-                ].map((it,i)=>(
-                  <div key={i} style={{backgroundColor:"#131922",borderRadius:"6px",padding:"12px 14px",
-                    border:"1px solid #1d2430",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div style={{fontSize:"9px",color:"#3d5070"}}>{it.l}</div>
-                    <div style={{fontSize:"17px",fontWeight:"700",color:it.c}}>{it.v}</div>
-                  </div>
-                ))}
-              </div>
+
             </div>
 
             {histData.length > 0 && (
@@ -1271,7 +1260,7 @@ export default function Dashboard() {
                 <div style={{fontSize:"10px",color:"#5a6a7e",letterSpacing:"2px",marginBottom:"4px"}}>TENDENCIA DE PRECIOS POR RANGO TARIFARIO</div>
                 <div style={{fontSize:"10px",color:"#3d5070",marginBottom:"14px"}}>Precio real pagado por kWh en cada rango · histórico bimestral.</div>
                 <div style={{display:"flex",gap:"16px",marginBottom:"12px"}}>
-                  {[{col:"#22c55e",label:"Básico"},{col:"#f59e0b",label:"Intermedio"},{col:"#ef4444",label:"Excedente"},{col:"#f97316",label:"Prom. total"}].map((l,i)=>(
+                  {[{col:"#22c55e",label:"Básico"},{col:"#f59e0b",label:"Intermedio"},{col:"#ef4444",label:"Excedente"}].map((l,i)=>(
                     <div key={i} style={{display:"flex",alignItems:"center",gap:"5px"}}>
                       <div style={{width:"20px",height:"2px",background:l.col,borderRadius:"2px"}}/>
                       <span style={{fontSize:"9px",color:"#5a6a7e",letterSpacing:"1px"}}>{l.label.toUpperCase()}</span>
@@ -1285,13 +1274,12 @@ export default function Dashboard() {
                     <YAxis tick={{fill:"#3d5070",fontSize:10}} domain={["auto","auto"]} tickFormatter={v=>`$${v}`}/>
                     <Tooltip contentStyle={ttStyle}
                       formatter={(v,name)=>{
-                        const labels={pBas:"Básico",pInt:"Intermedio",pExc:"Excedente",cKwh:"Prom. total"}
+                        const labels={pBas:"Básico",pInt:"Intermedio",pExc:"Excedente"}
                         return [`$${Number(v).toFixed(4)}/kWh`, labels[name]||name]
                       }}/>
                     <Line type="monotone" dataKey="pBas" stroke="#22c55e" strokeWidth={2} dot={{fill:"#22c55e",r:3}}/>
                     <Line type="monotone" dataKey="pInt" stroke="#f59e0b" strokeWidth={2} dot={{fill:"#f59e0b",r:3}}/>
                     <Line type="monotone" dataKey="pExc" stroke="#ef4444" strokeWidth={2} dot={{fill:"#ef4444",r:3}}/>
-                    <Line type="monotone" dataKey="cKwh" stroke="#f97316" strokeWidth={2} strokeDasharray="5 3" dot={{fill:"#f97316",r:3}}/>
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -1302,21 +1290,30 @@ export default function Dashboard() {
                   HISTORIAL TARIFARIO BIMESTRAL
                 </div>
                 <table style={S.table}><thead><tr>
-                  {["Período","kWh","P. Básico","P. Interm.","P. Excede.","$/kWh prom","Total"].map(h=>(
+                  {["Período","P. Básico","Δ Bás.","P. Interm.","Δ Int.","P. Excede.","Δ Exc."].map(h=>(
                     <th key={h} style={S.th}>{h}</th>
                   ))}
                 </tr></thead><tbody>
-                  {[...histData].reverse().map((r,i)=>(
+                  {[...histData].reverse().map((r,i,arr)=>{
+                    const prev = arr[i+1]
+                    const delta = (curr, ant) => {
+                      if (!curr || !ant) return null
+                      const pct = ((curr - ant) / ant * 100)
+                      const col = pct > 0 ? "#ef4444" : "#22c55e"
+                      const sign = pct > 0 ? "▲" : "▼"
+                      return <span style={{fontSize:"9px",color:col,marginLeft:"4px"}}>{sign}{Math.abs(pct).toFixed(1)}%</span>
+                    }
+                    return (
                     <tr key={i} style={{backgroundColor:i%2===0?"#0c1016":"transparent"}}>
                       <td style={{...S.td,fontSize:"11px",color:"#94a3b8"}}>{r.per}</td>
-                      <td style={{...S.td,fontSize:"12px",color:"#1aff70",fontWeight:"700"}}>{r.kwh}</td>
-                      <td style={{...S.td,fontSize:"11px",color:"#22c55e"}}>${r.pBas?.toFixed(4)||"—"}</td>
-                      <td style={{...S.td,fontSize:"11px",color:"#f59e0b"}}>${r.pInt?.toFixed(4)||"—"}</td>
-                      <td style={{...S.td,fontSize:"11px",color:"#ef4444"}}>${r.pExc?.toFixed(4)||"—"}</td>
-                      <td style={{...S.td,fontSize:"11px",color:"#f97316",fontWeight:"700"}}>${r.cKwh?.toFixed(4)||"—"}</td>
-                      <td style={{...S.td,fontSize:"12px",color:"#a78bfa",fontWeight:"700"}}>${Number(r.imp||0).toFixed(2)}</td>
+                      <td style={{...S.td,fontSize:"11px",color:"#22c55e"}}>${r.pBas?.toFixed(4)||"—"}{delta(r.pBas, prev?.pBas)}</td>
+                      <td style={{...S.td,fontSize:"10px",color:"#3d5070"}}>{prev?.pBas&&r.pBas ? `${((r.pBas-prev.pBas)/prev.pBas*100).toFixed(1)}%` : "—"}</td>
+                      <td style={{...S.td,fontSize:"11px",color:"#f59e0b"}}>${r.pInt?.toFixed(4)||"—"}{delta(r.pInt, prev?.pInt)}</td>
+                      <td style={{...S.td,fontSize:"10px",color:"#3d5070"}}>{prev?.pInt&&r.pInt ? `${((r.pInt-prev.pInt)/prev.pInt*100).toFixed(1)}%` : "—"}</td>
+                      <td style={{...S.td,fontSize:"11px",color:"#ef4444"}}>${r.pExc?.toFixed(4)||"—"}{delta(r.pExc, prev?.pExc)}</td>
+                      <td style={{...S.td,fontSize:"10px",color:"#3d5070"}}>{prev?.pExc&&r.pExc ? `${((r.pExc-prev.pExc)/prev.pExc*100).toFixed(1)}%` : "—"}</td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody></table>
               </div>
             )}
