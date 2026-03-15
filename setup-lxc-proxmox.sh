@@ -179,8 +179,7 @@ lxc "apt-get update -qq && \
 info "Configurando Docker daemon..."
 lxc "mkdir -p /etc/docker && cat > /etc/docker/daemon.json <<'EOF'
 {
-  \"storage-driver\": \"overlay2\",
-  \"iptables\": false
+  \"storage-driver\": \"overlay2\"
 }
 EOF"
 
